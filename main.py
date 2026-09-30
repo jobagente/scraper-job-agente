@@ -1,75 +1,100 @@
 import os
 import json
-import time
-import requests
 import gspread
+import requests
 from bs4 import BeautifulSoup
 import google.generativeai as genai
+from google.oauth2.service_account import Credentials
 
-# Configurazione API e Credenziali dai Secret di GitHub
-GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
-GCP_JSON = os.environ.get("GCP_CREDENTIALS")
-SHEET_ID = "15K6_SNBTB-QBNwFB2L6Qjrd56wZ7clD3Tm9zM-MI7zc"
+# --- 1. CONFIGURAZIONE GOOGLE SHEETS ---
+creds_json = os.environ.get('GCP_CREDENTIALS')
+if not creds_json:
+    raise ValueError("ERRORE: Variabile GCP_CREDENTIALS non trovata.")
 
-genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+creds_dict = json.loads(creds_json)
+scopes = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
+creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+gc = gspread.authorize(creds)
 
-# Connessione a Google Sheets
-creds_dict = json.loads(GCP_JSON)
-gc = gspread.service_account_from_dict(creds_dict)
-sheet = gc.open_by_key(SHEET_ID).sheet1
+# --- 2. CONFIGURAZIONE GEMINI IA ---
+gemini_api_key = os.environ.get('GEMINI_API_KEY')
+if not gemini_api_key:
+    raise ValueError("ERRORE: Variabile GEMINI_API_KEY non trovata.")
 
-def analizza_testo_con_ia(testo_pagina):
-    if not testo_pagina or len(testo_pagina) < 50:
-        return "ERRORE - Pagina vuota o non accessibile"
-    
-    prompt = f"""
-    Agisci come un selezionatore esperto. Analizza questo testo estratto da una pagina 'Lavora con noi' aziendale.
-    Il tuo obiettivo è identificare ESCLUSIVAMENTE se l'azienda sta cercando venditori indipendenti (Agenti di commercio, Agenti Enasarco, Procacciatori d'affari, mediatori con Partita IVA). 
-    Ignora completamente le ricerche per dipendenti tradizionali, commessi o impiegati.
-    
-    Testo estratto:
-    {testo_pagina[:6000]}
-    
-    Rispondi in modo secco:
-    Scrivi "AGENTE" se cercano figure a P.IVA/Enasarco.
-    Scrivi "DIPENDENTE/NESSUNO" se cercano altro o non ci sono posizioni commerciali aperte.
-    Aggiungi un trattino "-" e una motivazione di massimo 15 parole.
-    """
+genai.configure(api_key=gemini_api_key)
+# Utilizziamo gemini-pro che è il modello testuale più stabile
+model = genai.GenerativeModel('gemini-pro')
+
+def main():
+    # Sostituisci con il nome esatto del tuo file Google Sheets se lo hai rinominato
+    NOME_FOGLIO = "Aziende Target - Job Agente" 
     
     try:
-        response = model.generate_content(prompt)
-        return response.text.strip().replace("\n", " ")
+        sh = gc.open(NOME_FOGLIO)
+        worksheet = sh.sheet1
     except Exception as e:
-        return f"ERRORE API IA: {str(e)}"
+        print(f"Errore nell'apertura del foglio. Verifica che il nome sia esatto e che l'email del robot sia Editor.")
+        return
 
-# Lettura dati dal foglio
-dati = sheet.get_all_records()
-headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-
-for indice, riga in enumerate(dati):
-    riga_foglio = indice + 2 
-    url = riga.get("URL Pagina Lavora con noi", "").strip()
-    esito_attuale = riga.get("Esito IA (Agente/Dipendente)", "").strip()
+    # Legge tutti i valori del foglio
+    dati = worksheet.get_all_values()
     
-    # Processa solo le righe con un URL valido e non ancora analizzate
-    if url and not esito_attuale:
-        try:
-            print(f"Scansione in corso: {url}")
-            risposta_web = requests.get(url, headers=headers, timeout=10)
-            soup = BeautifulSoup(risposta_web.text, 'html.parser')
-            testo_grezzo = soup.get_text(separator=' ', strip=True)
+    # Salta l'intestazione (riga 1) e processa dalla riga 2 in poi
+    for i in range(1, len(dati)):
+        riga = dati[i]
+        if len(riga) < 2:
+            continue
             
-            esito_ia = analizza_testo_con_ia(testo_grezzo)
-            
-            # Aggiorna la cella dell'esito (Colonna D)
-            sheet.update_cell(riga_foglio, 4, esito_ia)
-            # Salva un'anteprima del testo per controllo (Colonna C)
-            sheet.update_cell(riga_foglio, 3, testo_grezzo[:150] + "...")
-            
-            time.sleep(3) # Pausa di rispetto
-            
-        except Exception as e:
-            sheet.update_cell(riga_foglio, 4, f"ERRORE SITO: {str(e)}")
+        url = riga[1].strip() # Colonna B (indice 1)
+        
+        # Gestione colonne C e D nel caso la riga sia vuota
+        esito_attuale = riga[3].strip() if len(riga) > 3 else ""
 
-print("Scansione completata.")
+        # Procediamo solo se c'è un URL e la colonna dell'esito è vuota o contiene un errore precedente
+        if url and (not esito_attuale or "ERRORE" in esito_attuale):
+            numero_riga_foglio = i + 1
+            print(f"Processo riga {numero_riga_foglio}: {url}")
+            
+            try:
+                # Facciamo finta di essere un browser reale per non farci bloccare dai siti
+                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                risposta_web = requests.get(url, headers=headers, timeout=15)
+                risposta_web.raise_for_status()
+                
+                soup = BeautifulSoup(risposta_web.text, 'html.parser')
+                
+                # Estrae il titolo per la colonna C
+                titolo_pagina = soup.title.string.strip() if soup.title and soup.title.string else "Titolo non disponibile"
+                
+                # Estrae il testo (limitato a 10000 caratteri) per l'Intelligenza Artificiale
+                testo_pagina = soup.get_text(separator=' ', strip=True)[:10000]
+                
+                # Prepara il comando per Gemini
+                prompt = f"""
+                Agisci come un selezionatore esperto. Analizza il seguente testo estratto da un annuncio di lavoro.
+                Stabilisci se la posizione offerta è per un "Agente" (partita IVA, procacciatore, venditore indipendente) oppure per un "Dipendente" (assunzione diretta, contratto subordinato, impiegato).
+                Rispondi SOLO ed ESCLUSIVAMENTE con una di queste due parole: AGENTE oppure DIPENDENTE. Non aggiungere altro.
+                
+                Testo:
+                {testo_pagina}
+                """
+                
+                # Interroga l'IA
+                risposta_ia = model.generate_content(prompt)
+                esito = risposta_ia.text.strip().upper().replace("*", "").replace(".", "")
+                
+                # Scrive i risultati sul foglio Excel
+                worksheet.update_cell(numero_riga_foglio, 3, titolo_pagina) # Colonna C
+                worksheet.update_cell(numero_riga_foglio, 4, esito)         # Colonna D
+                print(f"Riga {numero_riga_foglio} completata: {esito}")
+                
+            except requests.exceptions.RequestException:
+                worksheet.update_cell(numero_riga_foglio, 4, "ERRORE: Sito non raggiungibile")
+            except Exception as e:
+                worksheet.update_cell(numero_riga_foglio, 4, f"ERRORE IA: {str(e)[:50]}")
+
+if __name__ == "__main__":
+    main()
