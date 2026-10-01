@@ -26,7 +26,7 @@ if not gemini_api_key:
 
 genai.configure(api_key=gemini_api_key)
 # Utilizziamo gemini-pro che è il modello testuale più stabile
-model = genai.GenerativeModel('gemini-pro')
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 def main():
     # INCOLLA QUI IL LINK COMPLETO DEL TUO FOGLIO GOOGLE (copialo dalla barra degli indirizzi in alto)
