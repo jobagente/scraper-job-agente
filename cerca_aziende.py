@@ -27,13 +27,20 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit()
 
-# --- 3. MATRICE DI RICERCA ---
-keywords = ['"ricerca agenti di commercio"', 'lavora con noi agente', 'posizioni aperte commerciale', 'ricerca procacciatori']
+# --- 3. MATRICE DI RICERCA OTTIMIZZATA B2B ---
+# Query forzate con virgolette per colpire i siti proprietari
+keywords = ['"lavora con noi" "agenti di commercio"', '"invia il curriculum" "agente di commercio"', '"posizioni aperte" "rete vendita"', '"diventa partner" commerciale']
 province = ["Milano", "Brescia", "Verona", "Torino", "Bologna", "Roma", "Padova", "Vicenza", "Treviso", "Bergamo", "Firenze", "Napoli"]
+
+# Blacklist Estesa: blocca alla radice agenzie, aggregatori e portali
 siti_da_escludere = [
-    'indeed.com', 'infojobs.it', 'linkedin.com', 'subito.it', 
-    'cercoagente.it', 'venditori.it', 'bakeca.it', 'glassdoor.it', 
-    'jooble.org', 'monster.it', 'wikihow.com', 'wikipedia.org', 'youtube.com'
+    'indeed', 'infojobs', 'linkedin', 'subito', 'cercoagente', 'venditori', 
+    'bakeca', 'glassdoor', 'jooble', 'monster', 'wikihow', 'wikipedia', 'youtube',
+    'lavoro.it', 'jobeka', 'applavoro', 'jobsora', 'rappresentanti', 'startup.jobs', 
+    'jobijoba', 'trabajo', 'gigroup', 'randstad', 'grafton', 'adecco', 'manpower', 
+    'generazionevincente', 'trovolavoro', 'corriere', 'annunci', 'bancalavoro', 
+    'jobgratis', 'cornerjob', 'aliagenzia', 'synergie', 'pagepersonnel', 
+    'michaelpage', 'hays', 'quojobis', 'orienta', 'maw.it', 'inhrgroup', 'careerjet'
 ]
 
 def main():
@@ -44,9 +51,9 @@ def main():
         url = "https://google.serper.dev/search"
         payload = json.dumps({
             "q": query,
-            "gl": "it",  # Geolocalizza in Italia
-            "hl": "it",  # Cerca in Italiano
-            "num": 10
+            "gl": "it",
+            "hl": "it",
+            "num": 20 # Aumentato per compensare le eliminazioni della blacklist
         })
         headers = {
             'X-API-KEY': serper_api_key,
@@ -69,17 +76,17 @@ def main():
             dati_da_inserire = []
             for item in risultati:
                 titolo = item.get('title', 'Sito Aziendale')
-                link = item.get('link', '')
+                link = item.get('link', '').lower()
                 
-                # Salviamo il link se non è un PDF e non è un portale di annunci
                 if link and not link.endswith('.pdf'):
+                    # Filtra l'URL scartando tutto ciò che contiene una radice vietata
                     if not any(sito_vietato in link for sito_vietato in siti_da_escludere):
-                        dati_da_inserire.append([titolo, link])
+                        dati_da_inserire.append([titolo, item.get('link', '')])
             
             if dati_da_inserire:
                 intervallo = f"A{prima_riga_vuota}:B{prima_riga_vuota + len(dati_da_inserire) - 1}"
                 worksheet.update(values=dati_da_inserire, range_name=intervallo)
-                print(f"Aggiunti {len(dati_da_inserire)} prospect di alta qualità!")
+                print(f"Aggiunti {len(dati_da_inserire)} prospect mandanti!")
                 
         except Exception as e:
             print(f"Errore durante la ricerca API: {e}")
