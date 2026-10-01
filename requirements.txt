@@ -3,3 +3,9 @@ google-auth
 requests
 beautifulsoup4
 google-genai
+gspread
+google-auth
+requests
+beautifulsoup4
+google-genai
+duckduckgo-search
