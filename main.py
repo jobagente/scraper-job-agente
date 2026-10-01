@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import gspread
 import requests
 from bs4 import BeautifulSoup
@@ -24,7 +25,6 @@ gemini_api_key = os.environ.get('GEMINI_API_KEY')
 if not gemini_api_key:
     raise ValueError("ERRORE: Variabile GEMINI_API_KEY non trovata.")
 
-# Utilizzo del NUOVO SDK ufficiale rilasciato da Google
 client = genai.Client(api_key=gemini_api_key)
 
 def main():
@@ -69,7 +69,8 @@ def main():
                 {testo_pagina}
                 """
                 
-                # Chiamata API con il modello attuale per i nuovi progetti
+                time.sleep(3) # Pausa introdotta per prevenire l'errore 503
+                
                 risposta_ia = client.models.generate_content(
                     model='gemini-3.5-flash',
                     contents=prompt
