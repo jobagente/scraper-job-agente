@@ -25,8 +25,8 @@ if not gemini_api_key:
     raise ValueError("ERRORE: Variabile GEMINI_API_KEY non trovata.")
 
 genai.configure(api_key=gemini_api_key)
-# Utilizziamo il modello più recente e aggiornato
-model = genai.GenerativeModel('gemini-2.5-flash')
+# Utilizziamo il modello ufficiale e stabile
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 def main():
     # LINK COMPLETO DEL TUO FOGLIO GOOGLE
