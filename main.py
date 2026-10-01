@@ -25,11 +25,11 @@ if not gemini_api_key:
     raise ValueError("ERRORE: Variabile GEMINI_API_KEY non trovata.")
 
 genai.configure(api_key=gemini_api_key)
-# Utilizziamo gemini-pro che è il modello testuale più stabile
-model = genai.GenerativeModel('gemini-1.5-flash')
+# Utilizziamo il modello più recente e aggiornato
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 def main():
-    # INCOLLA QUI IL LINK COMPLETO DEL TUO FOGLIO GOOGLE (copialo dalla barra degli indirizzi in alto)
+    # LINK COMPLETO DEL TUO FOGLIO GOOGLE
     URL_FOGLIO = "https://docs.google.com/spreadsheets/d/15K6_SNBTB-QBNwFB2L6Qjrd56wZ7clD3Tm9zM-MI7zc/edit?gid=0#gid=0" 
     
     try:
