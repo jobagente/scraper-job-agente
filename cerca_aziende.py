@@ -28,7 +28,6 @@ except Exception as e:
     exit()
 
 # --- 3. MATRICE DI RICERCA PROFONDA ---
-# Parole chiave ammorbidite per trovare pagine discorsive delle aziende
 keywords = ['lavora con noi ricerca agenti di commercio', 'posizioni aperte commerciali rete vendita', 'ricerca procacciatori d\'affari candidature']
 province = ["Milano", "Brescia", "Verona", "Torino", "Bologna", "Roma", "Padova", "Vicenza", "Treviso", "Bergamo", "Firenze", "Napoli"]
 
@@ -40,7 +39,8 @@ siti_da_escludere = [
     'generazionevincente', 'trovolavoro', 'corriere', 'annunci', 'bancalavoro', 
     'jobgratis', 'cornerjob', 'aliagenzia', 'synergie', 'pagepersonnel', 
     'michaelpage', 'hays', 'quojobis', 'orienta', 'maw.it', 'inhrgroup', 'careerjet',
-    'impiego24', 'lavorofacile', 'ialweb', 'bachecalavoro'
+    'impiego24', 'lavorofacile', 'ialweb', 'bachecalavoro', 'jobrapido', 'cercolavoro', 
+    'e-workspa', 'cervellotik', 'ialombardia'
 ]
 
 def main():
@@ -53,7 +53,7 @@ def main():
             "q": query,
             "gl": "it",
             "hl": "it",
-            "num": 100 # ESTRAE 100 RISULTATI ALLA VOLTA per scavalcare le agenzie
+            "num": 100
         })
         headers = {
             'X-API-KEY': serper_api_key,
@@ -80,9 +80,12 @@ def main():
                 
                 if link and not link.endswith('.pdf'):
                     if not any(sito_vietato in link for sito_vietato in siti_da_escludere):
-                        # Evitiamo di inserire lo stesso link due volte nella stessa sessione
                         if not any(link == riga[1] for riga in dati_da_inserire):
                             dati_da_inserire.append([titolo, item.get('link', '')])
+                
+                # --- IL LIMITE: SI FERMA A 30 RISULTATI PER QUERY ---
+                if len(dati_da_inserire) >= 30:
+                    break
             
             if dati_da_inserire:
                 intervallo = f"A{prima_riga_vuota}:B{prima_riga_vuota + len(dati_da_inserire) - 1}"
