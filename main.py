@@ -69,14 +69,30 @@ def main():
                 {testo_pagina}
                 """
                 
-                time.sleep(3) # Pausa introdotta per prevenire l'errore 503
+                # --- VALVOLA ANTI-STRESS E RIPROVA AUTOMATICA ---
+                max_tentativi = 3
+                esito = "ERRORE SCONOSCIUTO"
                 
-                risposta_ia = client.models.generate_content(
-                    model='gemini-3.5-flash',
-                    contents=prompt
-                )
-                
-                esito = risposta_ia.text.strip().upper().replace("*", "").replace(".", "")
+                for tentativo in range(max_tentativi):
+                    try:
+                        # Respiro profondo di 15 secondi tra una chiamata e l'altra per non triggerare il limite
+                        time.sleep(15)
+                        
+                        risposta_ia = client.models.generate_content(
+                            model='gemini-3.5-flash',
+                            contents=prompt
+                        )
+                        
+                        esito = risposta_ia.text.strip().upper().replace("*", "").replace(".", "")
+                        break # Se la risposta arriva con successo, esce dal ciclo di riprova
+                        
+                    except Exception as error_ia:
+                        print(f"Tentativo {tentativo + 1} fallito. Motivo: {error_ia}")
+                        if tentativo < max_tentativi - 1:
+                            print("Rilevato blocco temporaneo (es. 429/503). Metto in pausa per 30 secondi e riprovo...")
+                            time.sleep(30) # Pausa di emergenza lunga
+                        else:
+                            raise error_ia # Se fallisce 3 volte, lancia l'errore definitivo
                 
                 worksheet.update_cell(numero_riga_foglio, 3, titolo_pagina)
                 worksheet.update_cell(numero_riga_foglio, 4, esito)
