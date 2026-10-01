@@ -27,12 +27,11 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit()
 
-# --- 3. MATRICE DI RICERCA OTTIMIZZATA B2B ---
-# Query forzate con virgolette per colpire i siti proprietari
-keywords = ['"lavora con noi" "agenti di commercio"', '"invia il curriculum" "agente di commercio"', '"posizioni aperte" "rete vendita"', '"diventa partner" commerciale']
+# --- 3. MATRICE DI RICERCA PROFONDA ---
+# Parole chiave ammorbidite per trovare pagine discorsive delle aziende
+keywords = ['lavora con noi ricerca agenti di commercio', 'posizioni aperte commerciali rete vendita', 'ricerca procacciatori d\'affari candidature']
 province = ["Milano", "Brescia", "Verona", "Torino", "Bologna", "Roma", "Padova", "Vicenza", "Treviso", "Bergamo", "Firenze", "Napoli"]
 
-# Blacklist Estesa: blocca alla radice agenzie, aggregatori e portali
 siti_da_escludere = [
     'indeed', 'infojobs', 'linkedin', 'subito', 'cercoagente', 'venditori', 
     'bakeca', 'glassdoor', 'jooble', 'monster', 'wikihow', 'wikipedia', 'youtube',
@@ -40,7 +39,8 @@ siti_da_escludere = [
     'jobijoba', 'trabajo', 'gigroup', 'randstad', 'grafton', 'adecco', 'manpower', 
     'generazionevincente', 'trovolavoro', 'corriere', 'annunci', 'bancalavoro', 
     'jobgratis', 'cornerjob', 'aliagenzia', 'synergie', 'pagepersonnel', 
-    'michaelpage', 'hays', 'quojobis', 'orienta', 'maw.it', 'inhrgroup', 'careerjet'
+    'michaelpage', 'hays', 'quojobis', 'orienta', 'maw.it', 'inhrgroup', 'careerjet',
+    'impiego24', 'lavorofacile', 'ialweb', 'bachecalavoro'
 ]
 
 def main():
@@ -53,7 +53,7 @@ def main():
             "q": query,
             "gl": "it",
             "hl": "it",
-            "num": 20 # Aumentato per compensare le eliminazioni della blacklist
+            "num": 100 # ESTRAE 100 RISULTATI ALLA VOLTA per scavalcare le agenzie
         })
         headers = {
             'X-API-KEY': serper_api_key,
@@ -79,9 +79,10 @@ def main():
                 link = item.get('link', '').lower()
                 
                 if link and not link.endswith('.pdf'):
-                    # Filtra l'URL scartando tutto ciò che contiene una radice vietata
                     if not any(sito_vietato in link for sito_vietato in siti_da_escludere):
-                        dati_da_inserire.append([titolo, item.get('link', '')])
+                        # Evitiamo di inserire lo stesso link due volte nella stessa sessione
+                        if not any(link == riga[1] for riga in dati_da_inserire):
+                            dati_da_inserire.append([titolo, item.get('link', '')])
             
             if dati_da_inserire:
                 intervallo = f"A{prima_riga_vuota}:B{prima_riga_vuota + len(dati_da_inserire) - 1}"
