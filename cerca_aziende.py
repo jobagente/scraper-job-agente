@@ -24,22 +24,28 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit()
 
-# --- 2. MATRICE DI RICERCA SEMPLIFICATA ---
-# Riduciamo la complessità per permettere al motore di trovare risultati
-keywords = ['"ricerca agenti"', 'lavora con noi agente', 'posizioni aperte commerciale']
+# --- 2. MATRICE DI RICERCA OTTIMIZZATA ---
+keywords = ['"ricerca agenti di commercio"', 'lavora con noi agente', 'posizioni aperte commerciale', 'ricerca procacciatori']
 province = ["Milano", "Brescia", "Verona", "Torino", "Bologna", "Roma", "Padova", "Vicenza", "Treviso", "Bergamo", "Firenze", "Napoli"]
-esclusioni = "-site:indeed.com -site:infojobs.it -site:linkedin.com -site:subito.it"
+
+# Facciamo il filtro dei siti direttamente in Python (molto più preciso e non confonde il motore di ricerca)
+siti_da_escludere = [
+    'indeed.com', 'infojobs.it', 'linkedin.com', 'subito.it', 
+    'cercoagente.it', 'venditori.it', 'bakeca.it', 'glassdoor.it', 
+    'jooble.org', 'monster.it', 'wikihow.com', 'wikipedia.org'
+]
 
 def main():
     ddgs = DDGS()
     
     for _ in range(3):
-        # Query più ampie: cerchiamo solo Keyword + Provincia + Esclusioni
-        query = f'{random.choice(keywords)} {random.choice(province)} {esclusioni}'
+        # Query pulita: solo parola chiave e provincia (niente operatori complessi)
+        query = f'{random.choice(keywords)} {random.choice(province)}'
         print(f"Cerco: {query}")
         
         try:
-            risultati = list(ddgs.text(query, max_results=10))
+            # region='it-it' FORZA DuckDuckGo a restituire risultati italiani e pertinenti
+            risultati = list(ddgs.text(query, region='it-it', max_results=15))
             
             if not risultati:
                 print("Nessun risultato trovato per questa query.")
@@ -54,8 +60,11 @@ def main():
                 titolo = item.get('title', 'Sito Aziendale')
                 link = item.get('href', '')
                 
+                # Filtri: scarta PDF e scarta i siti presenti nella lista delle esclusioni
                 if link and not link.endswith('.pdf'):
-                    dati_da_inserire.append([titolo, link])
+                    # any() verifica se c'è almeno un "sito_vietato" all'interno del "link"
+                    if not any(sito_vietato in link for sito_vietato in siti_da_escludere):
+                        dati_da_inserire.append([titolo, link])
             
             if dati_da_inserire:
                 intervallo = f"A{prima_riga_vuota}:B{prima_riga_vuota + len(dati_da_inserire) - 1}"
