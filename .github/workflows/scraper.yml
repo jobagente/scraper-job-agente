@@ -28,6 +28,7 @@ jobs:
     - name: Fase 1 - Bot Esploratore (Ricerca Prospect)
       env:
         GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+        SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
       run: python cerca_aziende.py
         
     - name: Fase 2 - Bot IA (Classificazione Gemini)
