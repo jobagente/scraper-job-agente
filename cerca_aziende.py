@@ -25,7 +25,6 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit()
 
-# Parole chiave ammorbidite: rimosso l'obbligo di inurl/intitle ma mantenute le virgolette per la precisione
 keywords = [
     '"lavora con noi" "agente di commercio"',
     '"posizioni aperte" "rete vendita"',
@@ -34,7 +33,6 @@ keywords = [
 ]
 province = ["Milano", "Brescia", "Verona", "Torino", "Bologna", "Roma", "Padova", "Vicenza", "Treviso", "Bergamo", "Firenze", "Napoli"]
 
-# Blacklist spietata per abbattere i portali
 siti_da_escludere = [
     'indeed', 'infojobs', 'linkedin', 'subito', 'cercoagente', 'venditori', 
     'bakeca', 'glassdoor', 'jooble', 'monster', 'wikihow', 'wikipedia', 'youtube',
@@ -56,7 +54,7 @@ def main():
             "q": query,
             "gl": "it",
             "hl": "it",
-            "num": 50
+            "num": 100 # Ripristinato il parametro sicuro e funzionante
         })
         headers = {
             'X-API-KEY': serper_api_key,
@@ -86,7 +84,6 @@ def main():
                         if not any(link == riga[1] for riga in dati_da_inserire):
                             dati_da_inserire.append([titolo, item.get('link', '')])
                 
-                # Massimo 20 prospect per query (totale 60 a notte)
                 if len(dati_da_inserire) >= 20:
                     break
             
@@ -95,6 +92,9 @@ def main():
                 worksheet.update(values=dati_da_inserire, range_name=intervallo)
                 print(f"Aggiunti {len(dati_da_inserire)} prospect mandanti!")
                 
+        except requests.exceptions.HTTPError as err:
+            print(f"Errore HTTP da Serper: {err}")
+            print(f"Dettaglio risposta: {err.response.text}")
         except Exception as e:
             print(f"Errore ricerca: {e}")
             
