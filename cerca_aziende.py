@@ -26,14 +26,23 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit()
 
+# Keywords B2B pure con operatori di esclusione (-) per respingere il retail
 keywords = [
-    'lavora con noi candidatura spontanea commerciale',
-    'entra nel nostro team posizioni aperte vendite',
-    'invia il tuo cv rete vendita',
-    'opportunità di carriera commerciale b2b'
+    'lavora con noi agente enasarco -negozio -retail',
+    'posizioni aperte procacciatore b2b -commesso -supermercato',
+    'ricerca agenti plurimandatari -franchising -promoter',
+    'candidatura commerciale partita iva -store -GDO',
+    'invia curriculum consulente commerciale b2b'
 ]
-province = ["Milano", "Brescia", "Verona", "Torino", "Bologna", "Roma", "Padova", "Vicenza", "Treviso", "Bergamo", "Firenze", "Napoli"]
 
+# Ampliamento massiccio del bacino geografico
+province = [
+    "Milano", "Brescia", "Verona", "Torino", "Bologna", "Roma", "Padova", "Vicenza", 
+    "Treviso", "Bergamo", "Firenze", "Napoli", "Varese", "Monza", "Como", "Modena", 
+    "Parma", "Reggio Emilia", "Cuneo", "Udine", "Pordenone"
+]
+
+# Blacklist aggiornata con i nuovi portali e siti retail/social
 siti_da_escludere = [
     'indeed', 'infojobs', 'linkedin', 'subito', 'cercoagente', 'venditori', 
     'bakeca', 'glassdoor', 'jooble', 'monster', 'wikihow', 'wikipedia', 'youtube',
@@ -45,11 +54,13 @@ siti_da_escludere = [
     'impiego24', 'lavorofacile', 'ialweb', 'bachecalavoro', 'jobrapido', 'cercolavoro',
     'simplyhired', 'altamiraweb', 'inrecruiting', 'niuma', 'cving', 'talent', 'metis',
     'agentscout', 'jobleads', 'whatjobs', 'cercoagenti', 'federagenti', 'camcom', 'ascom',
-    'kijiji', 'mitula', 'neuvoo', 'adzuna', 'trovit'
+    'kijiji', 'mitula', 'neuvoo', 'adzuna', 'trovit', 'tuolavoro', 'fashionjobs', 
+    'risorse.it', 'lifein', 'instagram', 'facebook', 'tiktok', 'bancaclv'
 ]
 
 def main():
-    for _ in range(10):
+    # Aumentati i cicli a 25 per massimizzare il volume notturno
+    for _ in range(25):
         query = f'{random.choice(keywords)} {random.choice(province)}'
         print(f"Eseguo query mirata: {query}")
         
@@ -88,13 +99,13 @@ def main():
                 if link and not link.endswith('.pdf'):
                     dominio_estratto = urlparse(link).netloc.replace('www.', '')
                     
-                    # CORRETTO: da "non any" a "not any"
                     if not any(sito_vietato in link for sito_vietato in siti_da_escludere):
                         if dominio_estratto not in domini_inseriti and not any(link == riga[1] for riga in dati_da_inserire):
                             dati_da_inserire.append([titolo, item.get('link', '')])
                             domini_inseriti.add(dominio_estratto) 
                 
-                if len(dati_da_inserire) >= 30:
+                # Consente fino a 40 estrazioni per singola query valida
+                if len(dati_da_inserire) >= 40:
                     break
             
             if dati_da_inserire:
@@ -107,7 +118,8 @@ def main():
         except Exception as e:
             print(f"Errore ricerca: {e}")
             
-        time.sleep(2)
+        # Pausa allungata per evitare blocchi con 25 cicli
+        time.sleep(3)
 
 if __name__ == "__main__":
     main()
