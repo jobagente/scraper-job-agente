@@ -26,7 +26,6 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit()
 
-# Keywords B2B pure con operatori di esclusione (-) per respingere il retail
 keywords = [
     'lavora con noi agente enasarco -negozio -retail',
     'posizioni aperte procacciatore b2b -commesso -supermercato',
@@ -35,14 +34,12 @@ keywords = [
     'invia curriculum consulente commerciale b2b'
 ]
 
-# Ampliamento massiccio del bacino geografico
 province = [
     "Milano", "Brescia", "Verona", "Torino", "Bologna", "Roma", "Padova", "Vicenza", 
     "Treviso", "Bergamo", "Firenze", "Napoli", "Varese", "Monza", "Como", "Modena", 
     "Parma", "Reggio Emilia", "Cuneo", "Udine", "Pordenone"
 ]
 
-# Blacklist aggiornata con i nuovi portali e siti retail/social
 siti_da_escludere = [
     'indeed', 'infojobs', 'linkedin', 'subito', 'cercoagente', 'venditori', 
     'bakeca', 'glassdoor', 'jooble', 'monster', 'wikihow', 'wikipedia', 'youtube',
@@ -55,11 +52,25 @@ siti_da_escludere = [
     'simplyhired', 'altamiraweb', 'inrecruiting', 'niuma', 'cving', 'talent', 'metis',
     'agentscout', 'jobleads', 'whatjobs', 'cercoagenti', 'federagenti', 'camcom', 'ascom',
     'kijiji', 'mitula', 'neuvoo', 'adzuna', 'trovit', 'tuolavoro', 'fashionjobs', 
-    'risorse.it', 'lifein', 'instagram', 'facebook', 'tiktok', 'bancaclv'
+    'risorse.it', 'lifein', 'instagram', 'facebook', 'tiktok', 'bancaclv',
+    'agenti.com', 'lavoropiu', 'jobbydoo', 'areajob', 'clickajobs', 'jobsavior', 
+    'tuoagente', 'ilcommerciale', 'ucv.online', 'guru.jobs', 'enasarco.it', 
+    'fnaarc', 'usarcitorino'
 ]
 
 def main():
-    # Aumentati i cicli a 25 per massimizzare il volume notturno
+    colonna_b = worksheet.col_values(2)
+    prima_riga_vuota = len(colonna_b) + 1
+    
+    # Costruisce la memoria leggendo le aziende già presenti nel foglio
+    domini_inseriti = set()
+    for link in colonna_b[1:]:
+        if link:
+            dominio = urlparse(link).netloc.replace('www.', '')
+            domini_inseriti.add(dominio)
+            
+    dati_da_inserire = []
+
     for _ in range(25):
         query = f'{random.choice(keywords)} {random.choice(province)}'
         print(f"Eseguo query mirata: {query}")
@@ -84,13 +95,8 @@ def main():
             risultati = data.get('organic', [])
             if not risultati:
                 print("Nessun risultato utile.")
+                time.sleep(3)
                 continue
-                
-            colonna_b = worksheet.col_values(2)
-            prima_riga_vuota = len(colonna_b) + 1
-            
-            dati_da_inserire = []
-            domini_inseriti = set() 
             
             for item in risultati:
                 titolo = item.get('title', 'Sito Aziendale')
@@ -100,26 +106,27 @@ def main():
                     dominio_estratto = urlparse(link).netloc.replace('www.', '')
                     
                     if not any(sito_vietato in link for sito_vietato in siti_da_escludere):
-                        if dominio_estratto not in domini_inseriti and not any(link == riga[1] for riga in dati_da_inserire):
+                        if dominio_estratto not in domini_inseriti:
                             dati_da_inserire.append([titolo, item.get('link', '')])
                             domini_inseriti.add(dominio_estratto) 
                 
-                # Consente fino a 40 estrazioni per singola query valida
-                if len(dati_da_inserire) >= 40:
+                if len(dati_da_inserire) >= 60:
                     break
-            
-            if dati_da_inserire:
-                intervallo = f"A{prima_riga_vuota}:B{prima_riga_vuota + len(dati_da_inserire) - 1}"
-                worksheet.update(values=dati_da_inserire, range_name=intervallo)
-                print(f"Aggiunti {len(dati_da_inserire)} prospect mandanti!")
-                
+                    
         except requests.exceptions.HTTPError as err:
             print(f"Errore HTTP da Serper: {err}")
         except Exception as e:
             print(f"Errore ricerca: {e}")
             
-        # Pausa allungata per evitare blocchi con 25 cicli
+        if len(dati_da_inserire) >= 60:
+            break
+            
         time.sleep(3)
+
+    if dati_da_inserire:
+        intervallo = f"A{prima_riga_vuota}:B{prima_riga_vuota + len(dati_da_inserire) - 1}"
+        worksheet.update(values=dati_da_inserire, range_name=intervallo)
+        print(f"Aggiunti {len(dati_da_inserire)} prospect mandanti!")
 
 if __name__ == "__main__":
     main()
