@@ -7,96 +7,72 @@ from bs4 import BeautifulSoup
 from google import genai
 from google.oauth2.service_account import Credentials
 
-# --- 1. CONFIGURAZIONE GOOGLE SHEETS ---
 creds_json = os.environ.get('GCP_CREDENTIALS')
-if not creds_json:
-    raise ValueError("ERRORE: Variabile GCP_CREDENTIALS non trovata.")
+gemini_api_key = os.environ.get('GEMINI_API_KEY')
 
 creds_dict = json.loads(creds_json)
-scopes = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
+scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
 gc = gspread.authorize(creds)
-
-# --- 2. CONFIGURAZIONE GEMINI IA ---
-gemini_api_key = os.environ.get('GEMINI_API_KEY')
-if not gemini_api_key:
-    raise ValueError("ERRORE: Variabile GEMINI_API_KEY non trovata.")
-
 client = genai.Client(api_key=gemini_api_key)
 
 def main():
     URL_FOGLIO = "https://docs.google.com/spreadsheets/d/15K6_SNBTB-QBNwFB2L6Qjrd56wZ7clD3Tm9zM-MI7zc/edit?gid=0#gid=0" 
-    
     try:
         sh = gc.open_by_url(URL_FOGLIO)
         worksheet = sh.sheet1
     except Exception as e:
-        print(f"Errore di connessione al link: {e}")
+        print(f"Errore di connessione: {e}")
         return
 
     dati = worksheet.get_all_values()
     
     for i in range(1, len(dati)):
         riga = dati[i]
-        if len(riga) < 2:
-            continue
+        if len(riga) < 2: continue
             
         url = riga[1].strip()
         esito_attuale = riga[3].strip() if len(riga) > 3 else ""
 
+        # Processa solo se l'esito è vuoto o c'era un errore precedente
         if url and (not esito_attuale or "ERRORE" in esito_attuale):
             numero_riga_foglio = i + 1
             print(f"Processo riga {numero_riga_foglio}: {url}")
             
             try:
-                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
                 risposta_web = requests.get(url, headers=headers, timeout=15)
                 risposta_web.raise_for_status()
                 
                 soup = BeautifulSoup(risposta_web.text, 'html.parser')
-                titolo_pagina = soup.title.string.strip() if soup.title and soup.title.string else "Titolo non disponibile"
+                titolo_pagina = soup.title.string.strip() if soup.title and soup.title.string else "Sito Aziendale"
                 testo_pagina = soup.get_text(separator=' ', strip=True)[:10000]
                 
                 prompt = f"""
-                Agisci come un selezionatore esperto. Analizza il seguente testo estratto da un annuncio di lavoro.
+                Agisci come un selezionatore esperto. Analizza il seguente testo estratto da un annuncio di lavoro o pagina 'Lavora con noi'.
                 Stabilisci se la posizione offerta è per un "Agente" (partita IVA, procacciatore, venditore indipendente) oppure per un "Dipendente" (assunzione diretta, contratto subordinato, impiegato).
                 Rispondi SOLO ed ESCLUSIVAMENTE con una di queste due parole: AGENTE oppure DIPENDENTE. Non aggiungere altro.
-                
-                Testo:
-                {testo_pagina}
+                Testo: {testo_pagina}
                 """
                 
-                # --- VALVOLA ANTI-STRESS E RIPROVA AUTOMATICA ---
-                max_tentativi = 3
-                esito = "ERRORE SCONOSCIUTO"
+                # PAUSA OBBLIGATORIA: Previene l'errore 429 di Google Gemini
+                time.sleep(20)
                 
+                max_tentativi = 3
                 for tentativo in range(max_tentativi):
                     try:
-                        # Respiro profondo di 15 secondi tra una chiamata e l'altra per non triggerare il limite
-                        time.sleep(15)
-                        
-                        risposta_ia = client.models.generate_content(
-                            model='gemini-3.5-flash',
-                            contents=prompt
-                        )
-                        
+                        risposta_ia = client.models.generate_content(model='gemini-3.5-flash', contents=prompt)
                         esito = risposta_ia.text.strip().upper().replace("*", "").replace(".", "")
-                        break # Se la risposta arriva con successo, esce dal ciclo di riprova
-                        
+                        break 
                     except Exception as error_ia:
-                        print(f"Tentativo {tentativo + 1} fallito. Motivo: {error_ia}")
+                        print(f"Tentativo {tentativo + 1} fallito: {error_ia}")
                         if tentativo < max_tentativi - 1:
-                            print("Rilevato blocco temporaneo (es. 429/503). Metto in pausa per 30 secondi e riprovo...")
-                            time.sleep(30) # Pausa di emergenza lunga
+                            time.sleep(30)
                         else:
-                            raise error_ia # Se fallisce 3 volte, lancia l'errore definitivo
+                            raise error_ia
                 
                 worksheet.update_cell(numero_riga_foglio, 3, titolo_pagina)
                 worksheet.update_cell(numero_riga_foglio, 4, esito)
-                print(f"Riga {numero_riga_foglio} completata: {esito}")
                 
             except requests.exceptions.RequestException:
                 worksheet.update_cell(numero_riga_foglio, 4, "ERRORE: Sito non raggiungibile")
