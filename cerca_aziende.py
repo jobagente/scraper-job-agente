@@ -6,14 +6,12 @@ import requests
 import gspread
 from google.oauth2.service_account import Credentials
 
-# --- 1. CONFIGURAZIONI ---
 creds_json = os.environ.get('GCP_CREDENTIALS')
 serper_api_key = os.environ.get('SERPER_API_KEY')
 
 if not creds_json or not serper_api_key:
     raise ValueError("ERRORE: Variabili mancanti (GCP_CREDENTIALS o SERPER_API_KEY).")
 
-# --- 2. CONNESSIONE GOOGLE SHEETS ---
 creds_dict = json.loads(creds_json)
 scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
@@ -27,10 +25,16 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit()
 
-# --- 3. MATRICE DI RICERCA PROFONDA ---
-keywords = ['lavora con noi ricerca agenti di commercio', 'posizioni aperte commerciali rete vendita', 'ricerca procacciatori d\'affari candidature']
+# Operatori avanzati di Google per trovare SOLO pagine di lavoro aziendali vere
+keywords = [
+    'intitle:"lavora con noi" "agente di commercio"',
+    'intitle:"posizioni aperte" "rete vendita"',
+    'inurl:careers "ricerca agenti"',
+    'inurl:lavora "procacciatore"'
+]
 province = ["Milano", "Brescia", "Verona", "Torino", "Bologna", "Roma", "Padova", "Vicenza", "Treviso", "Bergamo", "Firenze", "Napoli"]
 
+# Blacklist spietata per abbattere i portali
 siti_da_escludere = [
     'indeed', 'infojobs', 'linkedin', 'subito', 'cercoagente', 'venditori', 
     'bakeca', 'glassdoor', 'jooble', 'monster', 'wikihow', 'wikipedia', 'youtube',
@@ -39,21 +43,20 @@ siti_da_escludere = [
     'generazionevincente', 'trovolavoro', 'corriere', 'annunci', 'bancalavoro', 
     'jobgratis', 'cornerjob', 'aliagenzia', 'synergie', 'pagepersonnel', 
     'michaelpage', 'hays', 'quojobis', 'orienta', 'maw.it', 'inhrgroup', 'careerjet',
-    'impiego24', 'lavorofacile', 'ialweb', 'bachecalavoro', 'jobrapido', 'cercolavoro', 
-    'e-workspa', 'cervellotik', 'ialombardia'
+    'impiego24', 'lavorofacile', 'ialweb', 'bachecalavoro', 'jobrapido', 'cercolavoro'
 ]
 
 def main():
     for _ in range(3):
         query = f'{random.choice(keywords)} {random.choice(province)}'
-        print(f"Cerco sul VERO Google (via Serper): {query}")
+        print(f"Eseguo query mirata: {query}")
         
         url = "https://google.serper.dev/search"
         payload = json.dumps({
             "q": query,
             "gl": "it",
             "hl": "it",
-            "num": 100
+            "num": 50
         })
         headers = {
             'X-API-KEY': serper_api_key,
@@ -67,7 +70,7 @@ def main():
             
             risultati = data.get('organic', [])
             if not risultati:
-                print("Nessun risultato per questa query.")
+                print("Nessun risultato utile.")
                 continue
                 
             colonna_b = worksheet.col_values(2)
@@ -83,8 +86,8 @@ def main():
                         if not any(link == riga[1] for riga in dati_da_inserire):
                             dati_da_inserire.append([titolo, item.get('link', '')])
                 
-                # --- IL LIMITE: SI FERMA A 30 RISULTATI PER QUERY ---
-                if len(dati_da_inserire) >= 30:
+                # Massimo 20 prospect per query (totale 60 a notte)
+                if len(dati_da_inserire) >= 20:
                     break
             
             if dati_da_inserire:
@@ -93,7 +96,7 @@ def main():
                 print(f"Aggiunti {len(dati_da_inserire)} prospect mandanti!")
                 
         except Exception as e:
-            print(f"Errore durante la ricerca API: {e}")
+            print(f"Errore ricerca: {e}")
             
         time.sleep(2)
 
