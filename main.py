@@ -20,21 +20,29 @@ def main():
     URL_FOGLIO = "https://docs.google.com/spreadsheets/d/15K6_SNBTB-QBNwFB2L6Qjrd56wZ7clD3Tm9zM-MI7zc/edit?gid=0#gid=0" 
     try:
         sh = gc.open_by_url(URL_FOGLIO)
-        worksheet = sh.sheet1
+        worksheet_master = sh.sheet1
+        
+        # Connessione al foglio dell'assistente
+        try:
+            worksheet_assistente = sh.worksheet("Nuovi Prospect")
+        except gspread.exceptions.WorksheetNotFound:
+            print("ERRORE: Crea un nuovo foglio in basso a sinistra chiamato 'Nuovi Prospect'")
+            return
+            
     except Exception as e:
         print(f"Errore di connessione: {e}")
         return
 
-    dati = worksheet.get_all_values()
+    dati = worksheet_master.get_all_values()
     
     for i in range(1, len(dati)):
         riga = dati[i]
         if len(riga) < 2: continue
             
+        nome_azienda = riga[0].strip()
         url = riga[1].strip()
         esito_attuale = riga[3].strip() if len(riga) > 3 else ""
 
-        # Processa solo se l'esito è vuoto o c'era un errore precedente
         if url and (not esito_attuale or "ERRORE" in esito_attuale):
             numero_riga_foglio = i + 1
             print(f"Processo riga {numero_riga_foglio}: {url}")
@@ -55,7 +63,6 @@ def main():
                 Testo: {testo_pagina}
                 """
                 
-                # PAUSA OBBLIGATORIA: Previene l'errore 429 di Google Gemini
                 time.sleep(20)
                 
                 max_tentativi = 3
@@ -71,13 +78,19 @@ def main():
                         else:
                             raise error_ia
                 
-                worksheet.update_cell(numero_riga_foglio, 3, titolo_pagina)
-                worksheet.update_cell(numero_riga_foglio, 4, esito)
+                # Scrive i risultati nel Database Storico (Foglio 1)
+                worksheet_master.update_cell(numero_riga_foglio, 3, titolo_pagina)
+                worksheet_master.update_cell(numero_riga_foglio, 4, esito)
+                
+                # Se il prospect è valido, lo copia automaticamente nell'Inbox dell'Assistente
+                if "AGENTE" in esito:
+                    worksheet_assistente.append_row([nome_azienda, url, titolo_pagina, esito])
+                    print(f"+++ Azienda {nome_azienda} copiata in Nuovi Prospect! +++")
                 
             except requests.exceptions.RequestException:
-                worksheet.update_cell(numero_riga_foglio, 4, "ERRORE: Sito non raggiungibile")
+                worksheet_master.update_cell(numero_riga_foglio, 4, "ERRORE: Sito non raggiungibile")
             except Exception as e:
-                worksheet.update_cell(numero_riga_foglio, 4, f"ERRORE IA: {str(e)[:50]}")
+                worksheet_master.update_cell(numero_riga_foglio, 4, f"ERRORE IA: {str(e)[:50]}")
 
 if __name__ == "__main__":
     main()
