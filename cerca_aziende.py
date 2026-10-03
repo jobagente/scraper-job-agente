@@ -25,15 +25,17 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit()
 
-# Parole chiave in "plain text" senza virgolette o operatori per aggirare il blocco del piano gratuito
+# Parole chiave orientate pesantemente al B2B e ai mandati per evitare il retail
 keywords = [
-    'lavora con noi agente di commercio',
-    'posizioni aperte rete vendita',
-    'ricerca agenti candidatura',
-    'invia curriculum procacciatore'
+    'lavora con noi ricerca agenti plurimandatari',
+    'posizioni aperte rete vendita b2b',
+    'ricerca agenti di commercio candidature',
+    'diventa nostro agente mandato commerciale',
+    'invia curriculum procacciatori d\'affari b2b'
 ]
 province = ["Milano", "Brescia", "Verona", "Torino", "Bologna", "Roma", "Padova", "Vicenza", "Treviso", "Bergamo", "Firenze", "Napoli"]
 
+# Blacklist estesa con i nuovi aggregatori e software ATS (Altamira, Inrecruiting)
 siti_da_escludere = [
     'indeed', 'infojobs', 'linkedin', 'subito', 'cercoagente', 'venditori', 
     'bakeca', 'glassdoor', 'jooble', 'monster', 'wikihow', 'wikipedia', 'youtube',
@@ -42,11 +44,13 @@ siti_da_escludere = [
     'generazionevincente', 'trovolavoro', 'corriere', 'annunci', 'bancalavoro', 
     'jobgratis', 'cornerjob', 'aliagenzia', 'synergie', 'pagepersonnel', 
     'michaelpage', 'hays', 'quojobis', 'orienta', 'maw.it', 'inhrgroup', 'careerjet',
-    'impiego24', 'lavorofacile', 'ialweb', 'bachecalavoro', 'jobrapido', 'cercolavoro'
+    'impiego24', 'lavorofacile', 'ialweb', 'bachecalavoro', 'jobrapido', 'cercolavoro',
+    'simplyhired', 'altamiraweb', 'inrecruiting', 'niuma', 'cving', 'talent', 'metis'
 ]
 
 def main():
-    for _ in range(3):
+    # Aumentati i cicli di ricerca da 3 a 10 per estrarre molto più volume
+    for _ in range(10):
         query = f'{random.choice(keywords)} {random.choice(province)}'
         print(f"Eseguo query mirata: {query}")
         
@@ -55,7 +59,7 @@ def main():
             "q": query,
             "gl": "it",
             "hl": "it",
-            "num": 100
+            "num": 100 
         })
         headers = {
             'X-API-KEY': serper_api_key,
@@ -85,7 +89,8 @@ def main():
                         if not any(link == riga[1] for riga in dati_da_inserire):
                             dati_da_inserire.append([titolo, item.get('link', '')])
                 
-                if len(dati_da_inserire) >= 20:
+                # Consente fino a 30 risultati per singola query
+                if len(dati_da_inserire) >= 30:
                     break
             
             if dati_da_inserire:
@@ -95,7 +100,6 @@ def main():
                 
         except requests.exceptions.HTTPError as err:
             print(f"Errore HTTP da Serper: {err}")
-            print(f"Dettaglio risposta: {err.response.text}")
         except Exception as e:
             print(f"Errore ricerca: {e}")
             
