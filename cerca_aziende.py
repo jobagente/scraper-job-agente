@@ -25,12 +25,12 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit()
 
-# Operatori avanzati di Google per trovare SOLO pagine di lavoro aziendali vere
+# Parole chiave ammorbidite: rimosso l'obbligo di inurl/intitle ma mantenute le virgolette per la precisione
 keywords = [
-    'intitle:"lavora con noi" "agente di commercio"',
-    'intitle:"posizioni aperte" "rete vendita"',
-    'inurl:careers "ricerca agenti"',
-    'inurl:lavora "procacciatore"'
+    '"lavora con noi" "agente di commercio"',
+    '"posizioni aperte" "rete vendita"',
+    '"ricerca agenti" "candidatura"',
+    '"invia curriculum" "procacciatore"'
 ]
 province = ["Milano", "Brescia", "Verona", "Torino", "Bologna", "Roma", "Padova", "Vicenza", "Treviso", "Bergamo", "Firenze", "Napoli"]
 
