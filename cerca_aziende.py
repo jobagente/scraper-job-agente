@@ -25,11 +25,12 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit()
 
+# Parole chiave in "plain text" senza virgolette o operatori per aggirare il blocco del piano gratuito
 keywords = [
-    '"lavora con noi" "agente di commercio"',
-    '"posizioni aperte" "rete vendita"',
-    '"ricerca agenti" "candidatura"',
-    '"invia curriculum" "procacciatore"'
+    'lavora con noi agente di commercio',
+    'posizioni aperte rete vendita',
+    'ricerca agenti candidatura',
+    'invia curriculum procacciatore'
 ]
 province = ["Milano", "Brescia", "Verona", "Torino", "Bologna", "Roma", "Padova", "Vicenza", "Treviso", "Bergamo", "Firenze", "Napoli"]
 
@@ -54,7 +55,7 @@ def main():
             "q": query,
             "gl": "it",
             "hl": "it",
-            "num": 100 # Ripristinato il parametro sicuro e funzionante
+            "num": 100
         })
         headers = {
             'X-API-KEY': serper_api_key,
