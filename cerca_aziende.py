@@ -26,7 +26,6 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit()
 
-# Parole chiave "Corporate" per allontanare gli aggregatori e trovare i siti proprietari
 keywords = [
     'lavora con noi candidatura spontanea commerciale',
     'entra nel nostro team posizioni aperte vendite',
@@ -35,7 +34,6 @@ keywords = [
 ]
 province = ["Milano", "Brescia", "Verona", "Torino", "Bologna", "Roma", "Padova", "Vicenza", "Treviso", "Bergamo", "Firenze", "Napoli"]
 
-# Blacklist aggiornata con i nuovi portali, aggregatori e siti istituzionali
 siti_da_escludere = [
     'indeed', 'infojobs', 'linkedin', 'subito', 'cercoagente', 'venditori', 
     'bakeca', 'glassdoor', 'jooble', 'monster', 'wikihow', 'wikipedia', 'youtube',
@@ -81,21 +79,20 @@ def main():
             prima_riga_vuota = len(colonna_b) + 1
             
             dati_da_inserire = []
-            domini_inseriti = set() # Memoria per bloccare i domini duplicati
+            domini_inseriti = set() 
             
             for item in risultati:
                 titolo = item.get('title', 'Sito Aziendale')
                 link = item.get('link', '').lower()
                 
                 if link and not link.endswith('.pdf'):
-                    # Estrae solo il dominio netto (es. cercoagenti.it)
                     dominio_estratto = urlparse(link).netloc.replace('www.', '')
                     
-                    if non any(sito_vietato in link for sito_vietato in siti_da_escludere):
-                        # Se il dominio non è già stato inserito in questo ciclo, lo aggiunge
+                    # CORRETTO: da "non any" a "not any"
+                    if not any(sito_vietato in link for sito_vietato in siti_da_escludere):
                         if dominio_estratto not in domini_inseriti and not any(link == riga[1] for riga in dati_da_inserire):
                             dati_da_inserire.append([titolo, item.get('link', '')])
-                            domini_inseriti.add(dominio_estratto) # Salva il dominio per bloccare i successivi
+                            domini_inseriti.add(dominio_estratto) 
                 
                 if len(dati_da_inserire) >= 30:
                     break
