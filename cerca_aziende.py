@@ -41,7 +41,7 @@ province = [
     "Parma", "Reggio Emilia", "Cuneo", "Udine", "Pordenone"
 ]
 
-# Blacklist aggiornata con la rimozione di tutti gli ultimi falsi positivi individuati
+# Blacklist definitiva con i nuovi intrusi (agenzie, commercialisti, enti pubblici e aggregatori)
 siti_da_escludere = [
     'indeed', 'infojobs', 'linkedin', 'subito', 'cercoagente', 'venditori', 
     'bakeca', 'glassdoor', 'jooble', 'monster', 'wikihow', 'wikipedia', 'youtube',
@@ -61,7 +61,9 @@ siti_da_escludere = [
     'agentitreviso', 'inmatch', 'allibo', 'cgil', 'cisl', 'uil', 'confcommercio',
     'jobiri', 'livecareer', 'onlinecv', 'modelli-di-curriculum', 'ticonsiglio',
     'hrspecialistitalia', 'profiliecarriere', 'samsic-hr', 'lavorai', 'joinrs',
-    'intervieweb', 'provincia.', 'giurcost', 'esselungajob'
+    'intervieweb', 'provincia.', 'giurcost', 'esselungajob',
+    'nettowork', 'bebee', 'umana', 'studiostella', 'studiogiudice', 
+    'saviglianoformazione', 'comune.', 'business.telecomitalia.it'
 ]
 
 def main():
@@ -109,16 +111,16 @@ def main():
                 link = item.get('link', '').lower()
                 
                 if link and not link.endswith('.pdf'):
-                    # Estrae la radice del sito web (es. sumup.com)
+                    # Estrae la radice del sito web
                     dominio_estratto = urlparse(link).netloc.replace('www.', '')
                     
-                    # Controlla che non sia nella blacklist e che non sia mai stato inserito prima (né oggi né in passato)
+                    # Filtro incrociato: blacklist + memoria storica
                     if not any(sito_vietato in link for sito_vietato in siti_da_escludere):
                         if dominio_estratto not in domini_inseriti:
                             dati_da_inserire.append([titolo, item.get('link', '')])
                             domini_inseriti.add(dominio_estratto) 
                 
-                # Limite di sicurezza per evitare di estrarre troppi dati in una singola sessione
+                # Limite di sicurezza per singola query
                 if len(dati_da_inserire) >= 60:
                     break
                     
@@ -132,7 +134,7 @@ def main():
             
         time.sleep(3)
 
-    # Scrittura finale su Google Sheets
+    # Scrittura su Google Sheets in un blocco unico per ottimizzare i tempi
     if dati_da_inserire:
         intervallo = f"A{prima_riga_vuota}:B{prima_riga_vuota + len(dati_da_inserire) - 1}"
         worksheet.update(values=dati_da_inserire, range_name=intervallo)
