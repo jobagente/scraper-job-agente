@@ -1,10 +1,8 @@
 name: Job Agente Automation
 
 on:
-  # Esegue l'automazione in automatico ogni notte alle 2:00
   schedule:
     - cron: '0 2 * * *'
-  # Permette di avviare il processo anche a mano tramite il tasto "Run workflow"
   workflow_dispatch: 
 
 jobs:
