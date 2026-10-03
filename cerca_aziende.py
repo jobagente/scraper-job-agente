@@ -26,11 +26,12 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit()
 
+# Query corazzate per respingere blog, associazioni e siti informativi
 keywords = [
-    'lavora con noi agente enasarco -negozio -retail',
-    'posizioni aperte procacciatore b2b -commesso -supermercato',
-    'ricerca agenti plurimandatari -franchising -promoter',
-    'candidatura commerciale partita iva -store -GDO',
+    'lavora con noi agente enasarco -negozio -retail -sindacato -fisco',
+    'posizioni aperte procacciatore b2b -commesso -supermercato -blog -contributi',
+    'ricerca agenti plurimandatari -franchising -promoter -associazione',
+    'candidatura commerciale partita iva -store -GDO -corsi -formazione',
     'invia curriculum consulente commerciale b2b'
 ]
 
@@ -40,6 +41,7 @@ province = [
     "Parma", "Reggio Emilia", "Cuneo", "Udine", "Pordenone"
 ]
 
+# Blacklist aggiornata con sindacati, enti pubblici, ATS (allibo/inmatch) e servizi fiscali
 siti_da_escludere = [
     'indeed', 'infojobs', 'linkedin', 'subito', 'cercoagente', 'venditori', 
     'bakeca', 'glassdoor', 'jooble', 'monster', 'wikihow', 'wikipedia', 'youtube',
@@ -55,14 +57,14 @@ siti_da_escludere = [
     'risorse.it', 'lifein', 'instagram', 'facebook', 'tiktok', 'bancaclv',
     'agenti.com', 'lavoropiu', 'jobbydoo', 'areajob', 'clickajobs', 'jobsavior', 
     'tuoagente', 'ilcommerciale', 'ucv.online', 'guru.jobs', 'enasarco.it', 
-    'fnaarc', 'usarcitorino'
+    'fnaarc', 'usarci', 'unimpiego', 'fiscozen', 'assolombarda', 'regione.', 
+    'agentitreviso', 'inmatch', 'allibo', 'cgil', 'cisl', 'uil', 'confcommercio'
 ]
 
 def main():
     colonna_b = worksheet.col_values(2)
     prima_riga_vuota = len(colonna_b) + 1
     
-    # Costruisce la memoria leggendo le aziende già presenti nel foglio
     domini_inseriti = set()
     for link in colonna_b[1:]:
         if link:
