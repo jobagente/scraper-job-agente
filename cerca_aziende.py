@@ -41,7 +41,7 @@ province = [
     "Parma", "Reggio Emilia", "Cuneo", "Udine", "Pordenone"
 ]
 
-# Blacklist aggiornata con sindacati, enti pubblici, ATS (allibo/inmatch) e servizi fiscali
+# Blacklist aggiornata con la rimozione di tutti gli ultimi falsi positivi individuati
 siti_da_escludere = [
     'indeed', 'infojobs', 'linkedin', 'subito', 'cercoagente', 'venditori', 
     'bakeca', 'glassdoor', 'jooble', 'monster', 'wikihow', 'wikipedia', 'youtube',
@@ -58,13 +58,17 @@ siti_da_escludere = [
     'agenti.com', 'lavoropiu', 'jobbydoo', 'areajob', 'clickajobs', 'jobsavior', 
     'tuoagente', 'ilcommerciale', 'ucv.online', 'guru.jobs', 'enasarco.it', 
     'fnaarc', 'usarci', 'unimpiego', 'fiscozen', 'assolombarda', 'regione.', 
-    'agentitreviso', 'inmatch', 'allibo', 'cgil', 'cisl', 'uil', 'confcommercio'
+    'agentitreviso', 'inmatch', 'allibo', 'cgil', 'cisl', 'uil', 'confcommercio',
+    'jobiri', 'livecareer', 'onlinecv', 'modelli-di-curriculum', 'ticonsiglio',
+    'hrspecialistitalia', 'profiliecarriere', 'samsic-hr', 'lavorai', 'joinrs',
+    'intervieweb', 'provincia.', 'giurcost', 'esselungajob'
 ]
 
 def main():
     colonna_b = worksheet.col_values(2)
     prima_riga_vuota = len(colonna_b) + 1
     
+    # Crea la memoria storica leggendo tutti i domini già presenti nel foglio
     domini_inseriti = set()
     for link in colonna_b[1:]:
         if link:
@@ -105,13 +109,16 @@ def main():
                 link = item.get('link', '').lower()
                 
                 if link and not link.endswith('.pdf'):
+                    # Estrae la radice del sito web (es. sumup.com)
                     dominio_estratto = urlparse(link).netloc.replace('www.', '')
                     
+                    # Controlla che non sia nella blacklist e che non sia mai stato inserito prima (né oggi né in passato)
                     if not any(sito_vietato in link for sito_vietato in siti_da_escludere):
                         if dominio_estratto not in domini_inseriti:
                             dati_da_inserire.append([titolo, item.get('link', '')])
                             domini_inseriti.add(dominio_estratto) 
                 
+                # Limite di sicurezza per evitare di estrarre troppi dati in una singola sessione
                 if len(dati_da_inserire) >= 60:
                     break
                     
@@ -125,6 +132,7 @@ def main():
             
         time.sleep(3)
 
+    # Scrittura finale su Google Sheets
     if dati_da_inserire:
         intervallo = f"A{prima_riga_vuota}:B{prima_riga_vuota + len(dati_da_inserire) - 1}"
         worksheet.update(values=dati_da_inserire, range_name=intervallo)
