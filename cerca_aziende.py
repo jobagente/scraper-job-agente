@@ -4,6 +4,7 @@ import random
 import time
 import requests
 import gspread
+from urllib.parse import urlparse
 from google.oauth2.service_account import Credentials
 
 creds_json = os.environ.get('GCP_CREDENTIALS')
@@ -25,17 +26,16 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit()
 
-# Parole chiave orientate pesantemente al B2B e ai mandati per evitare il retail
+# Parole chiave "Corporate" per allontanare gli aggregatori e trovare i siti proprietari
 keywords = [
-    'lavora con noi ricerca agenti plurimandatari',
-    'posizioni aperte rete vendita b2b',
-    'ricerca agenti di commercio candidature',
-    'diventa nostro agente mandato commerciale',
-    'invia curriculum procacciatori d\'affari b2b'
+    'lavora con noi candidatura spontanea commerciale',
+    'entra nel nostro team posizioni aperte vendite',
+    'invia il tuo cv rete vendita',
+    'opportunità di carriera commerciale b2b'
 ]
 province = ["Milano", "Brescia", "Verona", "Torino", "Bologna", "Roma", "Padova", "Vicenza", "Treviso", "Bergamo", "Firenze", "Napoli"]
 
-# Blacklist estesa con i nuovi aggregatori e software ATS (Altamira, Inrecruiting)
+# Blacklist aggiornata con i nuovi portali, aggregatori e siti istituzionali
 siti_da_escludere = [
     'indeed', 'infojobs', 'linkedin', 'subito', 'cercoagente', 'venditori', 
     'bakeca', 'glassdoor', 'jooble', 'monster', 'wikihow', 'wikipedia', 'youtube',
@@ -45,11 +45,12 @@ siti_da_escludere = [
     'jobgratis', 'cornerjob', 'aliagenzia', 'synergie', 'pagepersonnel', 
     'michaelpage', 'hays', 'quojobis', 'orienta', 'maw.it', 'inhrgroup', 'careerjet',
     'impiego24', 'lavorofacile', 'ialweb', 'bachecalavoro', 'jobrapido', 'cercolavoro',
-    'simplyhired', 'altamiraweb', 'inrecruiting', 'niuma', 'cving', 'talent', 'metis'
+    'simplyhired', 'altamiraweb', 'inrecruiting', 'niuma', 'cving', 'talent', 'metis',
+    'agentscout', 'jobleads', 'whatjobs', 'cercoagenti', 'federagenti', 'camcom', 'ascom',
+    'kijiji', 'mitula', 'neuvoo', 'adzuna', 'trovit'
 ]
 
 def main():
-    # Aumentati i cicli di ricerca da 3 a 10 per estrarre molto più volume
     for _ in range(10):
         query = f'{random.choice(keywords)} {random.choice(province)}'
         print(f"Eseguo query mirata: {query}")
@@ -80,16 +81,22 @@ def main():
             prima_riga_vuota = len(colonna_b) + 1
             
             dati_da_inserire = []
+            domini_inseriti = set() # Memoria per bloccare i domini duplicati
+            
             for item in risultati:
                 titolo = item.get('title', 'Sito Aziendale')
                 link = item.get('link', '').lower()
                 
                 if link and not link.endswith('.pdf'):
-                    if not any(sito_vietato in link for sito_vietato in siti_da_escludere):
-                        if not any(link == riga[1] for riga in dati_da_inserire):
+                    # Estrae solo il dominio netto (es. cercoagenti.it)
+                    dominio_estratto = urlparse(link).netloc.replace('www.', '')
+                    
+                    if non any(sito_vietato in link for sito_vietato in siti_da_escludere):
+                        # Se il dominio non è già stato inserito in questo ciclo, lo aggiunge
+                        if dominio_estratto not in domini_inseriti and not any(link == riga[1] for riga in dati_da_inserire):
                             dati_da_inserire.append([titolo, item.get('link', '')])
+                            domini_inseriti.add(dominio_estratto) # Salva il dominio per bloccare i successivi
                 
-                # Consente fino a 30 risultati per singola query
                 if len(dati_da_inserire) >= 30:
                     break
             
