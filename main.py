@@ -23,15 +23,12 @@ def check_hubspot_contact(dominio, nome_azienda):
     url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
     headers = {'Authorization': f'Bearer {hubspot_token}', 'Content-Type': 'application/json'}
     
-    # Cerca nei Contatti per dominio web OPPURE per nome azienda per evitare duplicati
     payload = {
         "filterGroups": [
             {"filters": [{"propertyName": "website", "operator": "CONTAINS_TOKEN", "value": dominio}]},
-            {"filters": [{"propertyName": "firstname", "operator": "EQ", "value": nome_azienda}]},
             {"filters": [{"propertyName": "company", "operator": "EQ", "value": nome_azienda}]}
         ]
     }
-    
     try:
         res = requests.post(url, headers=headers, json=payload)
         if res.status_code == 200:
@@ -40,15 +37,14 @@ def check_hubspot_contact(dominio, nome_azienda):
         pass
     return False
 
-def crea_hubspot_contact(nome, url_sito, email):
-    if not hubspot_token: return
+def crea_hubspot_contact(nome_reale, url_sito, email):
+    if not hubspot_token: return "Token mancante"
     headers = {'Authorization': f'Bearer {hubspot_token}', 'Content-Type': 'application/json'}
     
-    # Compila la scheda Contatto come fai tu manualmente
     properties = {
-        "firstname": nome,
+        "firstname": nome_reale,
         "website": url_sito,
-        "company": nome
+        "company": nome_reale
     }
     
     if email and "@" in email and email.lower() != "nessuna":
@@ -56,9 +52,15 @@ def crea_hubspot_contact(nome, url_sito, email):
         
     try:
         url_cont = "https://api.hubapi.com/crm/v3/objects/contacts"
-        requests.post(url_cont, headers=headers, json={"properties": properties})
-    except:
-        pass
+        res = requests.post(url_cont, headers=headers, json={"properties": properties})
+        if res.status_code in (200, 201):
+            return "Inserito in HubSpot"
+        else:
+            errore = res.json().get("message", "Errore sconosciuto")
+            print(f"HubSpot ha rifiutato {nome_reale}: {errore}")
+            return f"Errore CRM: {errore}"
+    except Exception as e:
+        return f"Errore di connessione CRM"
 
 def main():
     URL_FOGLIO = "https://docs.google.com/spreadsheets/d/15K6_SNBTB-QBNwFB2L6Qjrd56wZ7clD3Tm9zM-MI7zc/edit?gid=0#gid=0" 
@@ -67,7 +69,7 @@ def main():
         worksheet_master = sh.sheet1
         worksheet_assistente = sh.worksheet("Nuovi Prospect")
     except Exception as e:
-        print(f"Errore di connessione al foglio: {e}")
+        print(f"Errore foglio: {e}")
         return
 
     dati = worksheet_master.get_all_values()
@@ -76,7 +78,6 @@ def main():
         riga = dati[i]
         if len(riga) < 2: continue
             
-        nome_azienda = riga[0].strip()
         url_sito = riga[1].strip()
         esito_attuale = riga[3].strip() if len(riga) > 3 else ""
 
@@ -94,13 +95,18 @@ def main():
                 testo = soup.get_text(separator=' ', strip=True)[:10000]
                 
                 prompt = f"""
-                Agisci come un selezionatore. Analizza questo testo di un annuncio.
-                1. Classifica la posizione in "AGENTE" (partita IVA) o "DIPENDENTE".
-                2. Trova un indirizzo email per contatti o candidature. Se assente, scrivi NESSUNA.
+                Analizza questo testo di una pagina web per una società di ricerca agenti.
+                Devi estrarre 3 informazioni chiave in modo sintetico:
                 
-                Rispondi ESATTAMENTE su una sola riga usando questo formato: ESITO | EMAIL
-                Esempio 1: AGENTE | hr@azienda.it
-                Esempio 2: DIPENDENTE | NESSUNA
+                1. ESITO: Classifica in "AGENTE" (se cercano P.IVA) o "DIPENDENTE". SE il sito è un portale di annunci generico (es. JobSavior, TuoAgente, Bakeca, Indeed) o un'agenzia interinale, scrivi TASSATIVAMENTE "PORTALE".
+                2. NOME_AZIENDA: Estrai il VERO nome del brand/azienda mandante (es. Verisure, Perfetti Van Melle). Non inserire MAI la posizione lavorativa o la città. Se è un portale o non si capisce, scrivi SCONOSCIUTO.
+                3. EMAIL: Trova un indirizzo email di contatto. Se assente, scrivi NESSUNA.
+                
+                Rispondi ESATTAMENTE su una sola riga in questo formato: ESITO | NOME_AZIENDA | EMAIL
+                
+                Esempio 1: AGENTE | Perfetti Van Melle | hr@azienda.it
+                Esempio 2: PORTALE | SCONOSCIUTO | NESSUNA
+                Esempio 3: DIPENDENTE | Esselunga | NESSUNA
                 
                 Testo: {testo}
                 """
@@ -113,11 +119,12 @@ def main():
                         risposta = client.models.generate_content(model='gemini-3.5-flash', contents=prompt)
                         risultato_raw = risposta.text.strip().replace("*", "")
                         parti = risultato_raw.split('|')
+                        
                         esito = parti[0].strip().upper()
-                        email = parti[1].strip().lower() if len(parti) > 1 else "NESSUNA"
+                        nome_reale = parti[1].strip() if len(parti) > 1 else "SCONOSCIUTO"
+                        email = parti[2].strip().lower() if len(parti) > 2 else "NESSUNA"
                         break 
                     except Exception as e_ia:
-                        print(f"Tentativo {t + 1} fallito: {e_ia}")
                         if t < max_tentativi - 1: time.sleep(30)
                         else: raise e_ia
                 
@@ -126,23 +133,15 @@ def main():
                 
                 if "AGENTE" in esito:
                     dominio = urlparse(url_sito).netloc.replace('www.', '')
-                    
-                    # Usa la nuova funzione dedicata ai Contatti
-                    esiste_in_crm = check_hubspot_contact(dominio, nome_azienda)
+                    esiste_in_crm = check_hubspot_contact(dominio, nome_reale)
                     
                     if esiste_in_crm:
-                        stato_crm = "Presente in HubSpot"
-                        print(f"Contatto {nome_azienda} già in HubSpot. Salto la creazione.")
+                        stato_crm = "Già in HubSpot"
                     else:
-                        stato_crm = "Inserito in HubSpot"
-                        # Crea il record nei Contatti
-                        crea_hubspot_contact(nome_azienda, url_sito, email)
-                        print(f"Contatto {nome_azienda} creato in HubSpot con email: {email}")
+                        stato_crm = crea_hubspot_contact(nome_reale, url_sito, email)
                         
-                    worksheet_assistente.append_row([nome_azienda, url_sito, titolo, esito, stato_crm, email])
+                    worksheet_assistente.append_row([nome_reale, url_sito, titolo, esito, stato_crm, email])
                 
-            except requests.exceptions.RequestException:
-                worksheet_master.update_cell(numero_riga, 4, "ERRORE: Sito non raggiungibile")
             except Exception as e:
                 worksheet_master.update_cell(numero_riga, 4, f"ERRORE IA: {str(e)[:50]}")
 
