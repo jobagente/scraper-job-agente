@@ -116,8 +116,8 @@ def main():
                 max_tentativi = 3
                 for t in range(max_tentativi):
                     try:
-                        # CORREZIONE APPLICATA QUI: gemini-1.5-flash
-                        risposta = client.models.generate_content(model='gemini-1.5-flash', contents=prompt)
+                        # Ripristinato il modello corretto per la tua libreria
+                        risposta = client.models.generate_content(model='gemini-3.5-flash', contents=prompt)
                         risultato_raw = risposta.text.strip().replace("*", "")
                         parti = risultato_raw.split('|')
                         
