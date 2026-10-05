@@ -18,11 +18,20 @@ creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
 gc = gspread.authorize(creds)
 client = genai.Client(api_key=gemini_api_key)
 
-def check_hubspot_company(dominio):
+def check_hubspot_contact(dominio, nome_azienda):
     if not hubspot_token: return False
-    url = "https://api.hubapi.com/crm/v3/objects/companies/search"
+    url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
     headers = {'Authorization': f'Bearer {hubspot_token}', 'Content-Type': 'application/json'}
-    payload = {"filterGroups": [{"filters": [{"propertyName": "domain", "operator": "EQ", "value": dominio}]}]}
+    
+    # Cerca nei Contatti per dominio web OPPURE per nome azienda per evitare duplicati
+    payload = {
+        "filterGroups": [
+            {"filters": [{"propertyName": "website", "operator": "CONTAINS_TOKEN", "value": dominio}]},
+            {"filters": [{"propertyName": "firstname", "operator": "EQ", "value": nome_azienda}]},
+            {"filters": [{"propertyName": "company", "operator": "EQ", "value": nome_azienda}]}
+        ]
+    }
+    
     try:
         res = requests.post(url, headers=headers, json=payload)
         if res.status_code == 200:
@@ -31,32 +40,25 @@ def check_hubspot_company(dominio):
         pass
     return False
 
-def crea_hubspot(nome, dominio, email):
+def crea_hubspot_contact(nome, url_sito, email):
     if not hubspot_token: return
     headers = {'Authorization': f'Bearer {hubspot_token}', 'Content-Type': 'application/json'}
-    company_id = None
     
-    # 1. Crea l'Azienda
+    # Compila la scheda Contatto come fai tu manualmente
+    properties = {
+        "firstname": nome,
+        "website": url_sito,
+        "company": nome
+    }
+    
+    if email and "@" in email and email.lower() != "nessuna":
+        properties["email"] = email
+        
     try:
-        url_comp = "https://api.hubapi.com/crm/v3/objects/companies"
-        res_comp = requests.post(url_comp, headers=headers, json={"properties": {"name": nome, "domain": dominio}})
-        if res_comp.status_code == 201:
-            company_id = res_comp.json().get('id')
+        url_cont = "https://api.hubapi.com/crm/v3/objects/contacts"
+        requests.post(url_cont, headers=headers, json={"properties": properties})
     except:
         pass
-
-    # 2. Se c'è una mail valida, crea il Contatto e lo associa all'Azienda
-    if email and "@" in email and email.lower() != "nessuna" and company_id:
-        try:
-            url_cont = "https://api.hubapi.com/crm/v3/objects/contacts"
-            res_cont = requests.post(url_cont, headers=headers, json={"properties": {"email": email, "company": nome}})
-            if res_cont.status_code == 201:
-                contact_id = res_cont.json().get('id')
-                # Associazione Contatto -> Azienda
-                url_assoc = f"https://api.hubapi.com/crm/v3/objects/contacts/{contact_id}/associations/companies/{company_id}/contact_to_company"
-                requests.put(url_assoc, headers=headers)
-        except:
-            pass
 
 def main():
     URL_FOGLIO = "https://docs.google.com/spreadsheets/d/15K6_SNBTB-QBNwFB2L6Qjrd56wZ7clD3Tm9zM-MI7zc/edit?gid=0#gid=0" 
@@ -124,15 +126,18 @@ def main():
                 
                 if "AGENTE" in esito:
                     dominio = urlparse(url_sito).netloc.replace('www.', '')
-                    esiste_in_crm = check_hubspot_company(dominio)
+                    
+                    # Usa la nuova funzione dedicata ai Contatti
+                    esiste_in_crm = check_hubspot_contact(dominio, nome_azienda)
                     
                     if esiste_in_crm:
                         stato_crm = "Presente in HubSpot"
-                        print(f"Azienda {nome_azienda} già in HubSpot. Salto la creazione.")
+                        print(f"Contatto {nome_azienda} già in HubSpot. Salto la creazione.")
                     else:
                         stato_crm = "Inserito in HubSpot"
-                        crea_hubspot(nome_azienda, dominio, email)
-                        print(f"Azienda {nome_azienda} creata in HubSpot con email: {email}")
+                        # Crea il record nei Contatti
+                        crea_hubspot_contact(nome_azienda, url_sito, email)
+                        print(f"Contatto {nome_azienda} creato in HubSpot con email: {email}")
                         
                     worksheet_assistente.append_row([nome_azienda, url_sito, titolo, esito, stato_crm, email])
                 
