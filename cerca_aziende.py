@@ -26,13 +26,19 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit()
 
-# Query corazzate per respingere blog, associazioni e siti informativi
-keywords = [
-    'lavora con noi agente enasarco -negozio -retail -sindacato -fisco',
-    'posizioni aperte procacciatore b2b -commesso -supermercato -blog -contributi',
-    'ricerca agenti plurimandatari -franchising -promoter -associazione',
-    'candidatura commerciale partita iva -store -GDO -corsi -formazione',
-    'invia curriculum consulente commerciale b2b'
+# MOTORE COMBINATORIO DINAMICO
+azioni = [
+    '"ricerca agenti"', '"cerchiamo agenti"', '"selezioniamo agenti"', 
+    '"lavora con noi" agente', '"posizioni aperte" commerciale', 
+    '"ricerca procacciatori"', '"invia cv" agente', '"selezione commerciali"',
+    '"opportunità per agenti"', '"ricerca rappresentanti"'
+]
+
+settori = [
+    "medicale", "software", "horeca", "edilizia", "industriale", "b2b",
+    "farmaceutico", "automazione", "logistica", "alimentare", "servizi alle imprese", 
+    "telecomunicazioni", "arredamento", "energia", "impiantistica", "cosmesi", 
+    "meccanica", "agricoltura", "ferramenta", "hitech", "packaging", "plastica"
 ]
 
 province = [
@@ -41,7 +47,7 @@ province = [
     "Parma", "Reggio Emilia", "Cuneo", "Udine", "Pordenone"
 ]
 
-# Blacklist definitiva con i nuovi intrusi (agenzie, commercialisti, enti pubblici e aggregatori)
+# Blacklist invariata (ottima e completa)
 siti_da_escludere = [
     'indeed', 'infojobs', 'linkedin', 'subito', 'cercoagente', 'venditori', 
     'bakeca', 'glassdoor', 'jooble', 'monster', 'wikihow', 'wikipedia', 'youtube',
@@ -79,8 +85,14 @@ def main():
             
     dati_da_inserire = []
 
-    for _ in range(25):
-        query = f'{random.choice(keywords)} {random.choice(province)}'
+    # Aumentati i tentativi da 25 a 45 per sfruttare la varietà delle nuove query
+    for _ in range(45):
+        azione = random.choice(azioni)
+        settore = random.choice(settori)
+        provincia = random.choice(province)
+        
+        # Le parole negative di base per pulire i risultati di Google
+        query = f'{azione} {settore} {provincia} -franchising -associazione -corsi'
         print(f"Eseguo query mirata: {query}")
         
         url = "https://google.serper.dev/search"
@@ -111,7 +123,6 @@ def main():
                 link = item.get('link', '').lower()
                 
                 if link and not link.endswith('.pdf'):
-                    # Estrae la radice del sito web
                     dominio_estratto = urlparse(link).netloc.replace('www.', '')
                     
                     # Filtro incrociato: blacklist + memoria storica
@@ -120,8 +131,7 @@ def main():
                             dati_da_inserire.append([titolo, item.get('link', '')])
                             domini_inseriti.add(dominio_estratto) 
                 
-                # Limite di sicurezza per singola query
-                if len(dati_da_inserire) >= 60:
+                if len(dati_da_inserire) >= 100:
                     break
                     
         except requests.exceptions.HTTPError as err:
@@ -129,12 +139,11 @@ def main():
         except Exception as e:
             print(f"Errore ricerca: {e}")
             
-        if len(dati_da_inserire) >= 60:
+        if len(dati_da_inserire) >= 100:
             break
             
         time.sleep(3)
 
-    # Scrittura su Google Sheets in un blocco unico per ottimizzare i tempi
     if dati_da_inserire:
         intervallo = f"A{prima_riga_vuota}:B{prima_riga_vuota + len(dati_da_inserire) - 1}"
         worksheet.update(values=dati_da_inserire, range_name=intervallo)
