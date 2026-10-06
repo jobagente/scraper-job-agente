@@ -79,7 +79,10 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
     if not serper_api_key: return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
         
     url = "https://google.serper.dev/search"
-    query = f'site:it.linkedin.com/in "{nome_azienda}" ("CEO" OR "Titolare" OR "Direttore Commerciale" OR "Responsabile Vendite" OR "Risorse Umane" OR "HR")'
+    
+    # === NUOVA RICERCA POTENZIATA CON SINONIMI ===
+    query = f'site:it.linkedin.com/in "{nome_azienda}" ("CEO" OR "Titolare" OR "Amministratore Delegato" OR "Direttore Generale" OR "Direttore Commerciale" OR "Direttore Vendite" OR "Responsabile Vendite" OR "Sales Manager" OR "Head of Sales" OR "Sales Director" OR "Risorse Umane" OR "HR" OR "Recruiter" OR "Talent Acquisition")'
+    
     payload = json.dumps({"q": query, "gl": "it", "hl": "it"})
     headers = {'X-API-KEY': serper_api_key, 'Content-Type': 'application/json'}
     
