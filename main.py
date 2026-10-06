@@ -24,9 +24,7 @@ def check_hubspot_contact(dominio, nome_azienda):
     if not hubspot_token: return False
     url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
     headers = {'Authorization': f'Bearer {hubspot_token}', 'Content-Type': 'application/json'}
-    
     nome_maiuscolo = nome_azienda.upper()
-    
     payload = {
         "filterGroups": [
             {"filters": [{"propertyName": "website", "operator": "CONTAINS_TOKEN", "value": dominio}]},
@@ -37,8 +35,7 @@ def check_hubspot_contact(dominio, nome_azienda):
         res = requests.post(url, headers=headers, json=payload)
         if res.status_code == 200:
             return res.json().get('total', 0) > 0
-    except:
-        pass
+    except: pass
     return False
 
 def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_dm, email_dm):
@@ -74,15 +71,12 @@ def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_
             return "Inserito in HubSpot"
         else:
             errore = res.json().get("message", "Errore sconosciuto")
-            print(f"HubSpot ha rifiutato {nome_azienda}: {errore}")
             return f"Errore CRM: {errore}"
     except Exception as e:
-        return f"Errore di connessione CRM"
+        return f"Errore CRM"
 
 def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
-    if not serper_api_key: 
-        print("Manca SERPER_API_KEY, salto la ricerca OSINT.")
-        return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
+    if not serper_api_key: return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
         
     url = "https://google.serper.dev/search"
     query = f'site:it.linkedin.com/in "{nome_azienda}" ("CEO" OR "Titolare" OR "Direttore Commerciale" OR "Responsabile Vendite" OR "Risorse Umane" OR "HR")'
@@ -99,31 +93,27 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         testo_risultati = "\n".join([f"- {r.get('title')}: {r.get('snippet')}" for r in risultati[:5]])
         
         prompt = f"""
-        Analizza questi profili LinkedIn trovati su Google per l'azienda '{nome_azienda}'.
-        Cerca di individuare UN SOLO Decision Maker principale (es. Titolare, CEO, Direttore Commerciale o HR).
-        Sapendo che l'email generica dell'azienda è '{email_generica}' (es. info@dominio.it) e il dominio web è '{dominio}', deduci la sua email diretta probabile (es. nome.cognome@dominio.it, n.cognome@dominio.it, ecc).
+        Analizza questi profili LinkedIn.
+        Azienda: '{nome_azienda}'
+        Email info: '{email_generica}', Dominio: '{dominio}'
         
-        Rispondi ESATTAMENTE su una sola riga in questo formato:
-        NOME E COGNOME | RUOLO | EMAIL_DEDOTTA
+        Trova UN SOLO Decision Maker (es. Titolare, CEO, Direttore Commerciale o HR). Deduci l'email diretta.
         
-        Se non trovi nessuna persona fisica o nessun ruolo attinente, scrivi TASSATIVAMENTE:
-        SCONOSCIUTO | NESSUNO | NESSUNA
+        Rispondi ESATTAMENTE su una sola riga: NOME E COGNOME | RUOLO | EMAIL_DEDOTTA
+        Se non trovi nessuno scrivi TASSATIVAMENTE: SCONOSCIUTO | NESSUNO | NESSUNA
         
-        Profili trovati:
+        Profili:
         {testo_risultati}
         """
         
         risposta = client.models.generate_content(model='gemini-3.5-flash', contents=prompt)
-        risultato_raw = risposta.text.strip().replace("*", "")
-        parti = risultato_raw.split('|')
+        parti = risposta.text.strip().replace("*", "").split('|')
         
         nome_dm = parti[0].strip() if len(parti) > 0 else "SCONOSCIUTO"
         ruolo_dm = parti[1].strip() if len(parti) > 1 else "NESSUNO"
         email_dm = parti[2].strip().lower() if len(parti) > 2 else "NESSUNA"
-        
         return nome_dm, ruolo_dm, email_dm
     except Exception as e:
-        print(f"Errore OSINT per {nome_azienda}: {e}")
         return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
 
 def main():
@@ -132,13 +122,12 @@ def main():
         sh = gc.open_by_url(URL_FOGLIO)
         worksheet_master = sh.sheet1
         worksheet_assistente = sh.worksheet("Nuovi Prospect")
-    except Exception as e:
-        print(f"Errore foglio: {e}")
-        return
+    except Exception as e: return
 
     dati = worksheet_master.get_all_values()
     data_odierna = datetime.now().strftime('%d/%m/%Y')
     
+    # Prepara un dizionario per riga Nuovi Prospect da accodare (per evitare errori posizionali)
     for i in range(1, len(dati)):
         riga = dati[i]
         if len(riga) < 2: continue
@@ -161,36 +150,31 @@ def main():
                 
                 prompt_web = f"""
                 Analizza questo testo di una pagina web per una società di ricerca agenti.
-                Devi estrarre 3 informazioni chiave in modo sintetico:
+                Estrai 3 informazioni chiave in modo sintetico:
                 
                 1. ESITO: Classifica in "AGENTE" (se cercano P.IVA e sono mandanti validi) o "DIPENDENTE".
-                ATTENZIONE - REGOLE DI ESCLUSIONE: Se il testo rientra in una di queste categorie, scrivi TASSATIVAMENTE "ESCLUSO":
-                - Portali di annunci generici (es. JobSavior, TuoAgente, Bakeca, Indeed) o agenzie interinali.
-                - Agenzie immobiliari (qualsiasi tipo).
-                - Aziende che propongono contratti di Luce, Gas ed Energia.
-                - Concessionarie di auto o automotive.
-                - Agenzie o studi di consulenza (es. Studio Stella Associati) che offrono servizi/consulenza *agli* agenti di commercio invece di assumerli.
-                - Le aziende specifiche: "Verisure" e "venditoriadistanza.it".
+                REGOLE DI ESCLUSIONE - Se rientra qui scrivi "ESCLUSO":
+                - Portali di annunci generici o agenzie interinali.
+                - Agenzie immobiliari.
+                - Aziende contratti Luce, Gas, Energia.
+                - Concessionarie auto o automotive.
+                - Agenzie/studi consulenza per agenti.
+                - Verisure o venditoriadistanza.it.
                 
-                2. NOME_AZIENDA: Estrai il VERO nome del brand/azienda mandante (es. Perfetti Van Melle). Non inserire MAI la posizione lavorativa o la città. Se l'esito è ESCLUSO, scrivi SCONOSCIUTO.
-                3. EMAIL: Trova un indirizzo email di contatto. Se assente, scrivi NESSUNA.
+                2. NOME_AZIENDA: VERO nome del brand/azienda mandante. (Se ESCLUSO scrivi SCONOSCIUTO).
+                3. EMAIL: Indirizzo email di contatto. (Se assente scrivi NESSUNA).
                 
-                Rispondi ESATTAMENTE su una sola riga in questo formato: ESITO | NOME_AZIENDA | EMAIL
-                
-                Esempio 1: AGENTE | Perfetti Van Melle | hr@azienda.it
-                Esempio 2: ESCLUSO | SCONOSCIUTO | NESSUNA
+                Rispondi su una sola riga: ESITO | NOME_AZIENDA | EMAIL
                 
                 Testo: {testo}
                 """
                 
                 time.sleep(20)
-                
                 max_tentativi = 3
                 for t in range(max_tentativi):
                     try:
                         risposta = client.models.generate_content(model='gemini-3.5-flash', contents=prompt_web)
-                        risultato_raw = risposta.text.strip().replace("*", "")
-                        parti = risultato_raw.split('|')
+                        parti = risposta.text.strip().replace("*", "").split('|')
                         
                         esito = parti[0].strip().upper()
                         nome_reale = parti[1].strip() if len(parti) > 1 else "SCONOSCIUTO"
@@ -216,13 +200,25 @@ def main():
                         stato_crm = crea_hubspot_contact(nome_reale, url_sito, email, nome_dm, ruolo_dm, email_dm)
                         
                     referente_completo = f"{nome_dm.upper()} {ruolo_dm.upper()}".strip() if nome_dm != "SCONOSCIUTO" else ""
+                    email_referente_finale = email_dm if email_dm != "nessuna" else ""
+                    email_azienda_finale = email if email != "nessuna" else ""
                     
-                    worksheet_assistente.append_row([
-                        nome_reale.upper(), url_sito, titolo, esito, stato_crm, email, referente_completo, email_dm, data_odierna
-                    ])
+                    # Usa una lista in un ordine bloccato per scrivere nel foglio "Nuovi Prospect"
+                    nuova_riga = [
+                        nome_reale.upper(),         # Colonna A
+                        url_sito,                   # Colonna B
+                        titolo,                     # Colonna C
+                        esito,                      # Colonna D
+                        stato_crm,                  # Colonna E
+                        email_azienda_finale,       # Colonna F
+                        referente_completo,         # Colonna G (Referente)
+                        email_referente_finale,     # Colonna H (Email Referente)
+                        data_odierna                # Colonna I (Data)
+                    ]
+                    worksheet_assistente.append_row(nuova_riga)
                 
             except Exception as e:
-                worksheet_master.update_cell(numero_riga, 4, f"ERRORE IA: {str(e)[:50]}")
+                worksheet_master.update_cell(numero_riga, 4, f"ERRORE")
                 worksheet_master.update_cell(numero_riga, 5, data_odierna)
 
 if __name__ == "__main__":
