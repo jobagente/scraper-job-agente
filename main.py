@@ -23,10 +23,12 @@ def check_hubspot_contact(dominio, nome_azienda):
     url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
     headers = {'Authorization': f'Bearer {hubspot_token}', 'Content-Type': 'application/json'}
     
+    nome_maiuscolo = nome_azienda.upper()
+    
     payload = {
         "filterGroups": [
             {"filters": [{"propertyName": "website", "operator": "CONTAINS_TOKEN", "value": dominio}]},
-            {"filters": [{"propertyName": "company", "operator": "EQ", "value": nome_azienda}]}
+            {"filters": [{"propertyName": "company", "operator": "EQ", "value": nome_maiuscolo}]}
         ]
     }
     try:
@@ -41,10 +43,14 @@ def crea_hubspot_contact(nome_reale, url_sito, email):
     if not hubspot_token: return "Token mancante"
     headers = {'Authorization': f'Bearer {hubspot_token}', 'Content-Type': 'application/json'}
     
+    nome_maiuscolo = nome_reale.upper()
+    
     properties = {
-        "firstname": nome_reale,
+        "firstname": nome_maiuscolo,
         "website": url_sito,
-        "company": nome_reale
+        "company": nome_maiuscolo,
+        "hubspot_owner_id": "13315750",
+        "note_appartenenza": "PROSPECT WEB"
     }
     
     if email and "@" in email and email.lower() != "nessuna":
@@ -57,7 +63,7 @@ def crea_hubspot_contact(nome_reale, url_sito, email):
             return "Inserito in HubSpot"
         else:
             errore = res.json().get("message", "Errore sconosciuto")
-            print(f"HubSpot ha rifiutato {nome_reale}: {errore}")
+            print(f"HubSpot ha rifiutato {nome_maiuscolo}: {errore}")
             return f"Errore CRM: {errore}"
     except Exception as e:
         return f"Errore di connessione CRM"
@@ -116,7 +122,6 @@ def main():
                 max_tentativi = 3
                 for t in range(max_tentativi):
                     try:
-                        # Ripristinato il modello corretto per la tua libreria
                         risposta = client.models.generate_content(model='gemini-3.5-flash', contents=prompt)
                         risultato_raw = risposta.text.strip().replace("*", "")
                         parti = risultato_raw.split('|')
@@ -141,7 +146,7 @@ def main():
                     else:
                         stato_crm = crea_hubspot_contact(nome_reale, url_sito, email)
                         
-                    worksheet_assistente.append_row([nome_reale, url_sito, titolo, esito, stato_crm, email])
+                    worksheet_assistente.append_row([nome_reale.upper(), url_sito, titolo, esito, stato_crm, email])
                 
             except Exception as e:
                 worksheet_master.update_cell(numero_riga, 4, f"ERRORE IA: {str(e)[:50]}")
