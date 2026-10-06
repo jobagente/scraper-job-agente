@@ -104,14 +104,22 @@ def main():
                 Analizza questo testo di una pagina web per una società di ricerca agenti.
                 Devi estrarre 3 informazioni chiave in modo sintetico:
                 
-                1. ESITO: Classifica in "AGENTE" (se cercano P.IVA) o "DIPENDENTE". SE il sito è un portale di annunci generico (es. JobSavior, TuoAgente, Bakeca, Indeed) o un'agenzia interinale, scrivi TASSATIVAMENTE "PORTALE".
-                2. NOME_AZIENDA: Estrai il VERO nome del brand/azienda mandante (es. Verisure, Perfetti Van Melle). Non inserire MAI la posizione lavorativa o la città. Se è un portale o non si capisce, scrivi SCONOSCIUTO.
+                1. ESITO: Classifica in "AGENTE" (se cercano P.IVA e sono mandanti validi) o "DIPENDENTE".
+                ATTENZIONE - REGOLE DI ESCLUSIONE: Se il testo rientra in una di queste categorie, scrivi TASSATIVAMENTE "ESCLUSO":
+                - Portali di annunci generici (es. JobSavior, TuoAgente, Bakeca, Indeed) o agenzie interinali.
+                - Agenzie immobiliari (qualsiasi tipo).
+                - Aziende che propongono contratti di Luce, Gas ed Energia.
+                - Concessionarie di auto o automotive.
+                - Agenzie o studi di consulenza (es. Studio Stella Associati) che offrono servizi/consulenza *agli* agenti di commercio invece di assumerli.
+                - Le aziende specifiche: "Verisure" e "venditoriadistanza.it".
+                
+                2. NOME_AZIENDA: Estrai il VERO nome del brand/azienda mandante (es. Perfetti Van Melle). Non inserire MAI la posizione lavorativa o la città. Se l'esito è ESCLUSO, scrivi SCONOSCIUTO.
                 3. EMAIL: Trova un indirizzo email di contatto. Se assente, scrivi NESSUNA.
                 
                 Rispondi ESATTAMENTE su una sola riga in questo formato: ESITO | NOME_AZIENDA | EMAIL
                 
                 Esempio 1: AGENTE | Perfetti Van Melle | hr@azienda.it
-                Esempio 2: PORTALE | SCONOSCIUTO | NESSUNA
+                Esempio 2: ESCLUSO | SCONOSCIUTO | NESSUNA
                 Esempio 3: DIPENDENTE | Esselunga | NESSUNA
                 
                 Testo: {testo}
