@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 from google import genai
 from google.oauth2.service_account import Credentials
 from urllib.parse import urlparse
+from datetime import datetime  # NUOVO MODULO PER LA DATA
 
 creds_json = os.environ.get('GCP_CREDENTIALS')
 gemini_api_key = os.environ.get('GEMINI_API_KEY')
@@ -80,6 +81,9 @@ def main():
 
     dati = worksheet_master.get_all_values()
     
+    # Prepara la data odierna nel formato Giorno/Mese/Anno
+    data_odierna = datetime.now().strftime('%d/%m/%Y')
+    
     for i in range(1, len(dati)):
         riga = dati[i]
         if len(riga) < 2: continue
@@ -144,6 +148,7 @@ def main():
                 
                 worksheet_master.update_cell(numero_riga, 3, titolo)
                 worksheet_master.update_cell(numero_riga, 4, esito)
+                worksheet_master.update_cell(numero_riga, 5, data_odierna) # SCRIVE LA DATA NELLA COLONNA E
                 
                 if "AGENTE" in esito:
                     dominio = urlparse(url_sito).netloc.replace('www.', '')
@@ -154,10 +159,12 @@ def main():
                     else:
                         stato_crm = crea_hubspot_contact(nome_reale, url_sito, email)
                         
-                    worksheet_assistente.append_row([nome_reale.upper(), url_sito, titolo, esito, stato_crm, email])
+                    # AGGIUNGE LA DATA COME 7ª COLONNA (COLONNA G)
+                    worksheet_assistente.append_row([nome_reale.upper(), url_sito, titolo, esito, stato_crm, email, data_odierna])
                 
             except Exception as e:
                 worksheet_master.update_cell(numero_riga, 4, f"ERRORE IA: {str(e)[:50]}")
+                worksheet_master.update_cell(numero_riga, 5, data_odierna) # SCRIVE LA DATA ANCHE IN CASO DI ERRORE
 
 if __name__ == "__main__":
     main()
