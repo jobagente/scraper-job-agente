@@ -47,7 +47,6 @@ province = [
     "Parma", "Reggio Emilia", "Cuneo", "Udine", "Pordenone"
 ]
 
-# Blacklist invariata (ottima e completa)
 siti_da_escludere = [
     'indeed', 'infojobs', 'linkedin', 'subito', 'cercoagente', 'venditori', 
     'bakeca', 'glassdoor', 'jooble', 'monster', 'wikihow', 'wikipedia', 'youtube',
@@ -76,7 +75,6 @@ def main():
     colonna_b = worksheet.col_values(2)
     prima_riga_vuota = len(colonna_b) + 1
     
-    # Crea la memoria storica leggendo tutti i domini già presenti nel foglio
     domini_inseriti = set()
     for link in colonna_b[1:]:
         if link:
@@ -85,22 +83,20 @@ def main():
             
     dati_da_inserire = []
 
-    # Aumentati i tentativi da 25 a 45 per sfruttare la varietà delle nuove query
     for _ in range(45):
         azione = random.choice(azioni)
         settore = random.choice(settori)
         provincia = random.choice(province)
         
-        # Le parole negative di base per pulire i risultati di Google
         query = f'{azione} {settore} {provincia} -franchising -associazione -corsi'
         print(f"Eseguo query mirata: {query}")
         
         url = "https://google.serper.dev/search"
+        # RIMOSSO IL PARAMETRO "num": 100 CHE CAUSAVA L'ERRORE 400
         payload = json.dumps({
             "q": query,
             "gl": "it",
-            "hl": "it",
-            "num": 100 
+            "hl": "it"
         })
         headers = {
             'X-API-KEY': serper_api_key,
@@ -125,7 +121,6 @@ def main():
                 if link and not link.endswith('.pdf'):
                     dominio_estratto = urlparse(link).netloc.replace('www.', '')
                     
-                    # Filtro incrociato: blacklist + memoria storica
                     if not any(sito_vietato in link for sito_vietato in siti_da_escludere):
                         if dominio_estratto not in domini_inseriti:
                             dati_da_inserire.append([titolo, item.get('link', '')])
