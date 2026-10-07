@@ -2,7 +2,7 @@ name: Job Agente Automation
 
 on:
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '17 1 * * *'
   workflow_dispatch:
 
 jobs:
