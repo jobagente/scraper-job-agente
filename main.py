@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import re
 import requests
 import gspread
 from bs4 import BeautifulSoup
@@ -78,7 +79,6 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         
     url = "https://google.serper.dev/search"
     
-    # === NUOVA RICERCA POTENZIATA CON SINONIMI ===
     query = f'site:it.linkedin.com/in "{nome_azienda}" ("CEO" OR "Titolare" OR "Amministratore Delegato" OR "Direttore Generale" OR "Direttore Commerciale" OR "Direttore Vendite" OR "Responsabile Vendite" OR "Sales Manager" OR "Head of Sales" OR "Sales Director" OR "Risorse Umane" OR "HR" OR "Recruiter" OR "Talent Acquisition")'
     
     payload = json.dumps({"q": query, "gl": "it", "hl": "it"})
@@ -96,14 +96,16 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         prompt = f"""
         Analizza questi profili LinkedIn.
         Azienda: '{nome_azienda}'
-        Email info: '{email_generica}', Dominio: '{dominio}'
+        Dominio aziendale: '{dominio}'
         
-        Trova UN SOLO Decision Maker (es. Titolare, CEO, Direttore Commerciale o HR). Deduci l'email diretta.
+        Obiettivo:
+        1. Trova UN SOLO Decision Maker (es. Titolare, CEO, Direttore Commerciale o HR).
+        2. COSTRUISCI la sua email diretta unendo il nome individuato e il dominio aziendale. Usa TASSATIVAMENTE il formato standard: nome.cognome@{dominio} (tutto minuscolo, rimuovi accenti, senza spazi).
         
-        Rispondi ESATTAMENTE su una sola riga: NOME E COGNOME | RUOLO | EMAIL_DEDOTTA
-        Se non trovi nessuno scrivi TASSATIVAMENTE: SCONOSCIUTO | NESSUNO | NESSUNA
+        Rispondi ESATTAMENTE su una sola riga: NOME E COGNOME | RUOLO | EMAIL_COSTRUITA
+        Se non trovi nessuna persona scrivi TASSATIVAMENTE: SCONOSCIUTO | NESSUNO | NESSUNA
         
-        Profili:
+        Profili trovati:
         {testo_risultati}
         """
         
@@ -128,7 +130,6 @@ def main():
     dati = worksheet_master.get_all_values()
     data_odierna = datetime.now().strftime('%d/%m/%Y')
     
-    # Prepara un dizionario per riga Nuovi Prospect da accodare (per evitare errori posizionali)
     for i in range(1, len(dati)):
         riga = dati[i]
         if len(riga) < 2: continue
@@ -145,6 +146,11 @@ def main():
                 res_web = requests.get(url_sito, headers=headers, timeout=15)
                 res_web.raise_for_status()
                 
+                # Ricerca Regex bruta nel codice sorgente per scovare le email nascoste
+                emails_trovate = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', res_web.text)
+                emails_pulite = list(set([e.lower() for e in emails_trovate if not e.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.js', '.css', 'sentry.io'))]))
+                email_suggerita = emails_pulite[0] if emails_pulite else "NESSUNA"
+
                 soup = BeautifulSoup(res_web.text, 'html.parser')
                 titolo = soup.title.string.strip() if soup.title and soup.title.string else "Sito Aziendale"
                 testo = soup.get_text(separator=' ', strip=True)[:10000]
@@ -163,7 +169,7 @@ def main():
                 - Verisure o venditoriadistanza.it.
                 
                 2. NOME_AZIENDA: VERO nome del brand/azienda mandante. (Se ESCLUSO scrivi SCONOSCIUTO).
-                3. EMAIL: Indirizzo email di contatto. (Se assente scrivi NESSUNA).
+                3. EMAIL: Indirizzo email di contatto. (Nota: ho estratto questa email nascosta dal codice sorgente: {email_suggerita}. Usala come prima scelta valida. Se non c'è, cercala nel testo. Se completamente assente scrivi NESSUNA).
                 
                 Rispondi su una sola riga: ESITO | NOME_AZIENDA | EMAIL
                 
@@ -204,7 +210,6 @@ def main():
                     email_referente_finale = email_dm if email_dm != "nessuna" else ""
                     email_azienda_finale = email if email != "nessuna" else ""
                     
-                    # Usa una lista in un ordine bloccato per scrivere nel foglio "Nuovi Prospect"
                     nuova_riga = [
                         nome_reale.upper(),         # Colonna A
                         url_sito,                   # Colonna B
