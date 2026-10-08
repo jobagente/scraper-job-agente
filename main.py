@@ -25,11 +25,14 @@ def check_hubspot_contact(dominio, nome_azienda):
     if not hubspot_token: return False
     url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
     headers = {'Authorization': f'Bearer {hubspot_token}', 'Content-Type': 'application/json'}
-    nome_maiuscolo = nome_azienda.upper()
+    
+    # Puliamo il nome per la ricerca nel CRM per evitare mancati match
+    azienda_pulita = re.sub(r'(?i)\b(s\.r\.l\.|srl|s\.p\.a\.|spa|s\.n\.c\.|snc|s\.a\.s\.|sas)\b', '', nome_azienda).strip()
+    
     payload = {
         "filterGroups": [
             {"filters": [{"propertyName": "website", "operator": "CONTAINS_TOKEN", "value": dominio}]},
-            {"filters": [{"propertyName": "company", "operator": "EQ", "value": nome_maiuscolo}]}
+            {"filters": [{"propertyName": "company", "operator": "CONTAINS_TOKEN", "value": azienda_pulita.upper()}]}
         ]
     }
     try:
@@ -79,7 +82,11 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         
     url = "https://google.serper.dev/search"
     
-    query = f'site:it.linkedin.com/in "{nome_azienda}" ("CEO" OR "Titolare" OR "Amministratore Delegato" OR "Direttore Generale" OR "Direttore Commerciale" OR "Direttore Vendite" OR "Responsabile Vendite" OR "Sales Manager" OR "Head of Sales" OR "Sales Director" OR "Risorse Umane" OR "HR" OR "Recruiter" OR "Talent Acquisition")'
+    # Puliamo il nome da Srl, Spa ecc. per migliorare drasticamente i risultati di LinkedIn
+    azienda_pulita = re.sub(r'(?i)\b(s\.r\.l\.|srl|s\.p\.a\.|spa|s\.n\.c\.|snc|s\.a\.s\.|sas)\b', '', nome_azienda).strip()
+    
+    # Query più morbida e mirata per i manager su LinkedIn
+    query = f'site:it.linkedin.com/in "{azienda_pulita}" (CEO OR Titolare OR Amministratore OR Direttore OR HR OR Manager)'
     
     payload = json.dumps({"q": query, "gl": "it", "hl": "it"})
     headers = {'X-API-KEY': serper_api_key, 'Content-Type': 'application/json'}
@@ -94,139 +101,37 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         testo_risultati = "\n".join([f"- {r.get('title')}: {r.get('snippet')}" for r in risultati[:5]])
         
         prompt = f"""
-        Analizza questi profili LinkedIn.
-        Azienda: '{nome_azienda}'
+        Analizza questi profili LinkedIn trovati per l'azienda '{azienda_pulita}'.
         Dominio aziendale: '{dominio}'
         
         Obiettivo:
-        1. Trova UN SOLO Decision Maker (es. Titolare, CEO, Direttore Commerciale o HR).
-        2. COSTRUISCI la sua email diretta unendo il nome individuato e il dominio aziendale. Usa TASSATIVAMENTE il formato standard: nome.cognome@{dominio} (tutto minuscolo, rimuovi accenti, senza spazi).
+        1. Trova UN SOLO Decision Maker (es. Titolare, CEO, Direttore o HR). Se ci sono più persone, scegline una di vertice.
+        2. COSTRUISCI la sua email diretta unendo il nome e il dominio. Formato: nome.cognome@{dominio} (tutto minuscolo, senza spazi, rimuovi accenti).
         
-        Rispondi ESATTAMENTE su una sola riga: NOME E COGNOME | RUOLO | EMAIL_COSTRUITA
-        Se non trovi nessuna persona scrivi TASSATIVAMENTE: SCONOSCIUTO | NESSUNO | NESSUNA
+        REGOLE DI RISPOSTA (TASSATIVE):
+        - Rispondi ESATTAMENTE su una sola riga usando il separatore |.
+        - NON usare prefissi come "Nome:", "Ruolo:" o "Email:". Scrivi solo i valori puri.
+        - Esempio di risposta corretta: Mario Rossi | CEO | mario.rossi@{dominio}
+        - Se non trovi nessuna persona chiara scrivi ESATTAMENTE: SCONOSCIUTO | NESSUNO | NESSUNA
         
         Profili trovati:
         {testo_risultati}
         """
         
         risposta = client.models.generate_content(model='gemini-3.5-flash', contents=prompt)
-        parti = risposta.text.strip().replace("*", "").split('|')
+        
+        # Pulizia robusta in caso Gemini aggiunga prefissi testuali non richiesti
+        testo_pulito = risposta.text.strip().replace("*", "").replace("Nome:", "").replace("Ruolo:", "").replace("Email:", "")
+        parti = testo_pulito.split('|')
         
         nome_dm = parti[0].strip() if len(parti) > 0 else "SCONOSCIUTO"
         ruolo_dm = parti[1].strip() if len(parti) > 1 else "NESSUNO"
         email_dm = parti[2].strip().lower() if len(parti) > 2 else "NESSUNA"
+        
+        # Sicurezza: se ha risposto in modo anomalo
+        if "SCONOSCIUTO" in nome_dm.upper() or len(nome_dm) < 3:
+            return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
+            
         return nome_dm, ruolo_dm, email_dm
     except Exception as e:
-        return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
-
-def main():
-    URL_FOGLIO = "https://docs.google.com/spreadsheets/d/15K6_SNBTB-QBNwFB2L6Qjrd56wZ7clD3Tm9zM-MI7zc/edit?gid=0#gid=0" 
-    try:
-        sh = gc.open_by_url(URL_FOGLIO)
-        worksheet_master = sh.sheet1
-        worksheet_assistente = sh.worksheet("Nuovi Prospect")
-    except Exception as e: return
-
-    dati = worksheet_master.get_all_values()
-    data_odierna = datetime.now().strftime('%d/%m/%Y')
-    
-    for i in range(1, len(dati)):
-        riga = dati[i]
-        if len(riga) < 2: continue
-            
-        url_sito = riga[1].strip()
-        esito_attuale = riga[3].strip() if len(riga) > 3 else ""
-
-        if url_sito and (not esito_attuale or "ERRORE" in esito_attuale):
-            numero_riga = i + 1
-            print(f"Processo riga {numero_riga}: {url_sito}")
-            
-            try:
-                headers = {'User-Agent': 'Mozilla/5.0'}
-                res_web = requests.get(url_sito, headers=headers, timeout=15)
-                res_web.raise_for_status()
-                
-                # Ricerca Regex bruta nel codice sorgente per scovare le email nascoste
-                emails_trovate = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', res_web.text)
-                emails_pulite = list(set([e.lower() for e in emails_trovate if not e.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.js', '.css', 'sentry.io'))]))
-                email_suggerita = emails_pulite[0] if emails_pulite else "NESSUNA"
-
-                soup = BeautifulSoup(res_web.text, 'html.parser')
-                titolo = soup.title.string.strip() if soup.title and soup.title.string else "Sito Aziendale"
-                testo = soup.get_text(separator=' ', strip=True)[:10000]
-                
-                prompt_web = f"""
-                Analizza questo testo di una pagina web per una società di ricerca agenti.
-                Estrai 3 informazioni chiave in modo sintetico:
-                
-                1. ESITO: Classifica in "AGENTE" (se cercano P.IVA e sono mandanti validi) o "DIPENDENTE".
-                REGOLE DI ESCLUSIONE - Se rientra qui scrivi "ESCLUSO":
-                - Portali di annunci generici o agenzie interinali.
-                - Agenzie immobiliari.
-                - Aziende contratti Luce, Gas, Energia.
-                - Concessionarie auto o automotive.
-                - Agenzie/studi consulenza per agenti.
-                - Verisure o venditoriadistanza.it.
-                
-                2. NOME_AZIENDA: VERO nome del brand/azienda mandante. (Se ESCLUSO scrivi SCONOSCIUTO).
-                3. EMAIL: Indirizzo email di contatto. (Nota: ho estratto questa email nascosta dal codice sorgente: {email_suggerita}. Usala come prima scelta valida. Se non c'è, cercala nel testo. Se completamente assente scrivi NESSUNA).
-                
-                Rispondi su una sola riga: ESITO | NOME_AZIENDA | EMAIL
-                
-                Testo: {testo}
-                """
-                
-                time.sleep(20)
-                max_tentativi = 3
-                for t in range(max_tentativi):
-                    try:
-                        risposta = client.models.generate_content(model='gemini-3.5-flash', contents=prompt_web)
-                        parti = risposta.text.strip().replace("*", "").split('|')
-                        
-                        esito = parti[0].strip().upper()
-                        nome_reale = parti[1].strip() if len(parti) > 1 else "SCONOSCIUTO"
-                        email = parti[2].strip().lower() if len(parti) > 2 else "NESSUNA"
-                        break 
-                    except Exception as e_ia:
-                        if t < max_tentativi - 1: time.sleep(30)
-                        else: raise e_ia
-                
-                # UPDATE A PACCHETTO: 1 sola chiamata per risparmiare quote Google Sheets
-                worksheet_master.update(values=[[titolo, esito, data_odierna]], range_name=f"C{numero_riga}:E{numero_riga}")
-                time.sleep(1.5) # Micro-pausa per mantenere la calma di Google
-                
-                if "AGENTE" in esito:
-                    dominio = urlparse(url_sito).netloc.replace('www.', '')
-                    esiste_in_crm = check_hubspot_contact(dominio, nome_reale)
-                    
-                    nome_dm, ruolo_dm, email_dm = cerca_decision_maker_osint(nome_reale, dominio, email)
-                    
-                    if esiste_in_crm:
-                        stato_crm = "Già in HubSpot"
-                    else:
-                        stato_crm = crea_hubspot_contact(nome_reale, url_sito, email, nome_dm, ruolo_dm, email_dm)
-                        
-                    referente_completo = f"{nome_dm.upper()} {ruolo_dm.upper()}".strip() if nome_dm != "SCONOSCIUTO" else ""
-                    email_referente_finale = email_dm if email_dm != "nessuna" else ""
-                    email_azienda_finale = email if email != "nessuna" else ""
-                    
-                    nuova_riga = [
-                        nome_reale.upper(),         # Colonna A
-                        url_sito,                   # Colonna B
-                        titolo,                     # Colonna C
-                        esito,                      # Colonna D
-                        stato_crm,                  # Colonna E
-                        email_azienda_finale,       # Colonna F
-                        referente_completo,         # Colonna G (Referente)
-                        email_referente_finale,     # Colonna H (Email Referente)
-                        data_odierna                # Colonna I (Data)
-                    ]
-                    worksheet_assistente.append_row(nuova_riga)
-                
-            except Exception as e:
-                # UPDATE A PACCHETTO ANCHE PER L'ERRORE: riduce del 50% il carico su Google
-                worksheet_master.update(values=[["ERRORE", data_odierna]], range_name=f"D{numero_riga}:E{numero_riga}")
-                time.sleep(1.5) # Micro-pausa per l'errore
-
-if __name__ == "__main__":
-    main()
+        return "SCONOSCI
