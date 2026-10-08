@@ -191,9 +191,9 @@ def main():
                         if t < max_tentativi - 1: time.sleep(30)
                         else: raise e_ia
                 
-                worksheet_master.update_cell(numero_riga, 3, titolo)
-                worksheet_master.update_cell(numero_riga, 4, esito)
-                worksheet_master.update_cell(numero_riga, 5, data_odierna)
+                # UPDATE A PACCHETTO: 1 sola chiamata per risparmiare quote Google Sheets
+                worksheet_master.update(values=[[titolo, esito, data_odierna]], range_name=f"C{numero_riga}:E{numero_riga}")
+                time.sleep(1.5) # Micro-pausa per mantenere la calma di Google
                 
                 if "AGENTE" in esito:
                     dominio = urlparse(url_sito).netloc.replace('www.', '')
@@ -224,8 +224,9 @@ def main():
                     worksheet_assistente.append_row(nuova_riga)
                 
             except Exception as e:
-                worksheet_master.update_cell(numero_riga, 4, f"ERRORE")
-                worksheet_master.update_cell(numero_riga, 5, data_odierna)
+                # UPDATE A PACCHETTO ANCHE PER L'ERRORE: riduce del 50% il carico su Google
+                worksheet_master.update(values=[["ERRORE", data_odierna]], range_name=f"D{numero_riga}:E{numero_riga}")
+                time.sleep(1.5) # Micro-pausa per l'errore
 
 if __name__ == "__main__":
     main()
