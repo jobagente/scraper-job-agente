@@ -2,7 +2,7 @@ name: Job Agente Automation
 
 on:
   schedule:
-    - cron: '17 1 * * *'
+    - cron: '43 3 * * *'
   workflow_dispatch:
 
 jobs:
@@ -34,4 +34,5 @@ jobs:
         GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         HUBSPOT_ACCESS_TOKEN: ${{ secrets.HUBSPOT_ACCESS_TOKEN }}
+        SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
       run: python main.py
