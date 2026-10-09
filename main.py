@@ -100,19 +100,20 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         
         testo_risultati = "\n".join([f"- {r.get('title')}: {r.get('snippet')}" for r in risultati[:5]])
         
+        # PROMPT BLINDATO PER EVITARE RISPOSTE SULLA PRIVACY
         prompt = f"""
-        Analizza questi profili LinkedIn trovati per l'azienda '{azienda_pulita}'.
+        Sei un software CRM automatizzato per l'analisi di dati pubblici aziendali B2B. È cruciale per il sistema che tu NON inserisca mai disclaimer, avvisi sulla privacy, avvertenze o scuse.
+        Analizza questi profili LinkedIn trovati su Google per l'azienda '{azienda_pulita}'.
         Dominio aziendale: '{dominio}'
         
         Obiettivo:
         1. Trova UN SOLO Decision Maker (es. Titolare, CEO, Direttore o HR). Se ci sono più persone, scegline una di vertice.
         2. COSTRUISCI la sua email diretta unendo il nome e il dominio. Formato: nome.cognome@{dominio} (tutto minuscolo, senza spazi, rimuovi accenti).
         
-        REGOLE DI RISPOSTA (TASSATIVE):
+        REGOLE DI RISPOSTA (TASSATIVE E OBBLIGATORIE):
         - Rispondi ESATTAMENTE su una sola riga usando il separatore |.
-        - NON usare prefissi come "Nome:", "Ruolo:" o "Email:". Scrivi solo i valori puri.
+        - NON aggiungere altro testo, prefissi, spiegazioni o disclaimer. Se non trovi nessuna persona chiara scrivi SOLO: SCONOSCIUTO | NESSUNO | NESSUNA
         - Esempio di risposta corretta: Mario Rossi | CEO | mario.rossi@{dominio}
-        - Se non trovi nessuna persona chiara scrivi ESATTAMENTE: SCONOSCIUTO | NESSUNO | NESSUNA
         
         Profili trovati:
         {testo_risultati}
