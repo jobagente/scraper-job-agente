@@ -51,7 +51,6 @@ def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_
         "website": url_sito
     }
     
-    # FORZATURA DEL TESTO IN MAIUSCOLO (.upper())
     if settore and settore != "--":
         properties["settore"] = settore.upper()
     if telefono and telefono != "--":
@@ -84,13 +83,62 @@ def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_
     except Exception as e:
         return f"Errore CRM"
 
+# =======================================================
+# NUOVE FUNZIONI PER CERCARE TELEFONO/INDIRIZZO SU GOOGLE
+# =======================================================
+def cerca_dati_aziendali_osint(nome_azienda):
+    if not serper_api_key or nome_azienda == "SCONOSCIUTO": return None, None
+        
+    url = "https://google.serper.dev/search"
+    azienda_pulita = re.sub(r'(?i)\b(s\.r\.l\.|srl|s\.p\.a\.|spa|s\.n\.c\.|snc|s\.a\.s\.|sas)\b', '', nome_azienda).strip()
+    
+    # Cerchiamo la scheda locale dell'azienda su Google
+    payload = json.dumps({"q": f"{azienda_pulita} sede centrale Italia", "gl": "it", "hl": "it"})
+    headers = {'X-API-KEY': serper_api_key, 'Content-Type': 'application/json'}
+    
+    try:
+        res = requests.post(url, headers=headers, data=payload)
+        if res.status_code == 200:
+            data = res.json()
+            telefono = None
+            indirizzo = None
+            
+            # 1. Prova a pescare dalla "Scheda" laterale di Google (Knowledge Graph)
+            kg = data.get('knowledgeGraph', {})
+            if 'phoneNumber' in kg: telefono = kg['phoneNumber']
+            if 'address' in kg: indirizzo = kg['address']
+            
+            # 2. Se non li ha trovati, prova con i risultati di Google Maps (Places)
+            if not telefono or not indirizzo:
+                places = data.get('places', [])
+                if places:
+                    if not telefono: telefono = places[0].get('phoneNumber')
+                    if not indirizzo: indirizzo = places[0].get('address')
+                    
+            return telefono, indirizzo
+    except Exception: pass
+    return None, None
+
+def formatta_indirizzo_osint(indirizzo):
+    if not indirizzo: return "--", "--"
+    prompt = f"Estrai Città (con sigla provincia se non è capoluogo) e Regione da questo indirizzo: '{indirizzo}'.\nRispondi ESATTAMENTE su una sola riga nel formato: CITTA | REGIONE\nSe manca un dato scrivi --."
+    try:
+        risposta = client.models.generate_content(model='gemini-3.6-flash', contents=prompt)
+        parti = risposta.text.strip().replace("*", "").split('|')
+        citta = parti[0].strip().upper() if len(parti) > 0 else "--"
+        regione = parti[1].strip().upper() if len(parti) > 1 else "--"
+        return citta, regione
+    except:
+        return "--", "--"
+
+# =======================================================
+# FUNZIONE PER DECISION MAKER (LINKEDIN)
+# =======================================================
 def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
     if not serper_api_key: return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
         
     url = "https://google.serper.dev/search"
-    
     azienda_pulita = re.sub(r'(?i)\b(s\.r\.l\.|srl|s\.p\.a\.|spa|s\.n\.c\.|snc|s\.a\.s\.|sas)\b', '', nome_azienda).strip()
-    
     query = f'site:it.linkedin.com/in "{azienda_pulita}" (CEO OR Titolare OR Amministratore OR Direttore OR HR OR Manager)'
     
     payload = json.dumps({"q": query, "gl": "it", "hl": "it"})
@@ -124,7 +172,6 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         """
         
         risposta = client.models.generate_content(model='gemini-3.6-flash', contents=prompt)
-        
         testo_pulito = risposta.text.strip().replace("*", "").replace("Nome:", "").replace("Ruolo:", "").replace("Email:", "")
         parti = testo_pulito.split('|')
         
@@ -221,9 +268,12 @@ def main():
                         nome_reale = parti[1].strip() if len(parti) > 1 else "SCONOSCIUTO"
                         email = parti[2].strip().lower() if len(parti) > 2 else "NESSUNA"
                         settore = parti[3].strip() if len(parti) > 3 else "--"
-                        telefono = parti[4].strip() if len(parti) > 4 else "--"
-                        citta = parti[5].strip() if len(parti) > 5 else "--"
-                        regione = parti[6].strip() if len(parti) > 6 else "--"
+                        
+                        # Salviamo temporaneamente i dati trovati sul sito come Piano B
+                        telefono_sito = parti[4].strip() if len(parti) > 4 else "--"
+                        citta_sito = parti[5].strip() if len(parti) > 5 else "--"
+                        regione_sito = parti[6].strip() if len(parti) > 6 else "--"
+                        
                         break 
                     except Exception as e_ia:
                         if t < max_tentativi - 1: time.sleep(30)
@@ -236,12 +286,29 @@ def main():
                     dominio = urlparse(url_sito).netloc.replace('www.', '')
                     esiste_in_crm = check_hubspot_contact(dominio, nome_reale)
                     
+                    # 1. Ricerca Decision Maker su LinkedIn
                     nome_dm, ruolo_dm, email_dm = cerca_decision_maker_osint(nome_reale, dominio, email)
+                    
+                    # 2. Ricerca Dati Strutturati su Google Maps
+                    tel_google, ind_google = cerca_dati_aziendali_osint(nome_reale)
+                    
+                    # 3. Logica di fusione: vince Google, se fallisce vince il Sito Web
+                    telefono_finale = tel_google if tel_google else telefono_sito
+                    
+                    citta_finale = citta_sito
+                    regione_finale = regione_sito
+                    if ind_google:
+                        citta_g, reg_g = formatta_indirizzo_osint(ind_google)
+                        if citta_g != "--": citta_finale = citta_g
+                        if reg_g != "--": regione_finale = reg_g
                     
                     if esiste_in_crm:
                         stato_crm = "Già in HubSpot"
                     else:
-                        stato_crm = crea_hubspot_contact(nome_reale, url_sito, email, nome_dm, ruolo_dm, email_dm, settore, telefono, citta, regione)
+                        stato_crm = crea_hubspot_contact(
+                            nome_reale, url_sito, email, nome_dm, ruolo_dm, email_dm, 
+                            settore, telefono_finale, citta_finale, regione_finale
+                        )
                         
                     referente_completo = f"{nome_dm.upper()} {ruolo_dm.upper()}".strip() if nome_dm != "SCONOSCIUTO" else ""
                     email_referente_finale = email_dm if email_dm != "nessuna" else ""
