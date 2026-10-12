@@ -51,15 +51,15 @@ def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_
         "website": url_sito
     }
     
-    # MAPPATURA NUOVI CAMPI IN HUBSPOT CON I NOMI INTERNI CORRETTI
+    # FORZATURA DEL TESTO IN MAIUSCOLO (.upper())
     if settore and settore != "--":
-        properties["settore"] = settore  # Nome interno personalizzato verificato
+        properties["settore"] = settore.upper()
     if telefono and telefono != "--":
-        properties["phone"] = telefono
+        properties["phone"] = telefono.upper()
     if citta and citta != "--":
-        properties["city"] = citta
+        properties["city"] = citta.upper()
     if regione and regione != "--":
-        properties["state"] = regione
+        properties["state"] = regione.upper()
     
     if nome_dm and nome_dm != "SCONOSCIUTO":
         ruolo = ruolo_dm.upper() if ruolo_dm != "NESSUNO" else ""
