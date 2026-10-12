@@ -119,7 +119,8 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         {testo_risultati}
         """
         
-        risposta = client.models.generate_content(model='gemini-3.5-flash', contents=prompt)
+        # --- AGGIORNAMENTO A GEMINI 3.6 FLASH ---
+        risposta = client.models.generate_content(model='gemini-3.6-flash', contents=prompt)
         
         # Pulizia robusta in caso Gemini aggiunga prefissi testuali non richiesti
         testo_pulito = risposta.text.strip().replace("*", "").replace("Nome:", "").replace("Ruolo:", "").replace("Email:", "")
@@ -208,7 +209,8 @@ def main():
                 max_tentativi = 3
                 for t in range(max_tentativi):
                     try:
-                        risposta = client.models.generate_content(model='gemini-3.5-flash', contents=prompt_web)
+                        # --- AGGIORNAMENTO A GEMINI 3.6 FLASH ---
+                        risposta = client.models.generate_content(model='gemini-3.6-flash', contents=prompt_web)
                         parti = risposta.text.strip().replace("*", "").split('|')
                         
                         esito = parti[0].strip().upper()
