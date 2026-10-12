@@ -26,7 +26,6 @@ def check_hubspot_contact(dominio, nome_azienda):
     url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
     headers = {'Authorization': f'Bearer {hubspot_token}', 'Content-Type': 'application/json'}
     
-    # Puliamo il nome per la ricerca nel CRM per evitare mancati match
     azienda_pulita = re.sub(r'(?i)\b(s\.r\.l\.|srl|s\.p\.a\.|spa|s\.n\.c\.|snc|s\.a\.s\.|sas)\b', '', nome_azienda).strip()
     
     payload = {
@@ -42,7 +41,7 @@ def check_hubspot_contact(dominio, nome_azienda):
     except: pass
     return False
 
-def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_dm, email_dm):
+def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_dm, email_dm, settore, telefono, citta, regione):
     if not hubspot_token: return "Token mancante"
     headers = {'Authorization': f'Bearer {hubspot_token}', 'Content-Type': 'application/json'}
     
@@ -52,12 +51,20 @@ def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_
         "website": url_sito
     }
     
-    # GESTIONE REFERENTE
+    # MAPPATURA NUOVI CAMPI IN HUBSPOT CON I NOMI INTERNI CORRETTI
+    if settore and settore != "--":
+        properties["settore"] = settore  # Nome interno personalizzato verificato
+    if telefono and telefono != "--":
+        properties["phone"] = telefono
+    if citta and citta != "--":
+        properties["city"] = citta
+    if regione and regione != "--":
+        properties["state"] = regione
+    
     if nome_dm and nome_dm != "SCONOSCIUTO":
         ruolo = ruolo_dm.upper() if ruolo_dm != "NESSUNO" else ""
         properties["referente"] = f"{nome_dm.upper()} {ruolo}".strip()
         
-    # GESTIONE EMAIL PRINCIPALE E AGGIUNTIVA
     email_primaria = email_dm if (email_dm and "@" in email_dm and email_dm != "nessuna") else email_generica
     email_secondaria = email_generica if (email_primaria == email_dm) else None
 
@@ -82,10 +89,8 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         
     url = "https://google.serper.dev/search"
     
-    # Puliamo il nome da Srl, Spa ecc. per migliorare drasticamente i risultati di LinkedIn
     azienda_pulita = re.sub(r'(?i)\b(s\.r\.l\.|srl|s\.p\.a\.|spa|s\.n\.c\.|snc|s\.a\.s\.|sas)\b', '', nome_azienda).strip()
     
-    # Query più morbida e mirata per i manager su LinkedIn
     query = f'site:it.linkedin.com/in "{azienda_pulita}" (CEO OR Titolare OR Amministratore OR Direttore OR HR OR Manager)'
     
     payload = json.dumps({"q": query, "gl": "it", "hl": "it"})
@@ -100,7 +105,6 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         
         testo_risultati = "\n".join([f"- {r.get('title')}: {r.get('snippet')}" for r in risultati[:5]])
         
-        # PROMPT BLINDATO PER EVITARE RISPOSTE SULLA PRIVACY
         prompt = f"""
         Sei un software CRM automatizzato per l'analisi di dati pubblici aziendali B2B. È cruciale per il sistema che tu NON inserisca mai disclaimer, avvisi sulla privacy, avvertenze o scuse.
         Analizza questi profili LinkedIn trovati su Google per l'azienda '{azienda_pulita}'.
@@ -119,10 +123,8 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         {testo_risultati}
         """
         
-        # --- AGGIORNAMENTO A GEMINI 3.6 FLASH ---
         risposta = client.models.generate_content(model='gemini-3.6-flash', contents=prompt)
         
-        # Pulizia robusta in caso Gemini aggiunga prefissi testuali non richiesti
         testo_pulito = risposta.text.strip().replace("*", "").replace("Nome:", "").replace("Ruolo:", "").replace("Email:", "")
         parti = testo_pulito.split('|')
         
@@ -130,7 +132,6 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         ruolo_dm = parti[1].strip() if len(parti) > 1 else "NESSUNO"
         email_dm = parti[2].strip().lower() if len(parti) > 2 else "NESSUNA"
         
-        # Sicurezza: se ha risposto in modo anomalo
         if "SCONOSCIUTO" in nome_dm.upper() or len(nome_dm) < 3:
             return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
             
@@ -165,10 +166,8 @@ def main():
                 res_web = requests.get(url_sito, headers=headers, timeout=15)
                 res_web.raise_for_status()
                 
-                # Ricerca Regex bruta nel codice sorgente per scovare le email nascoste
                 emails_trovate = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', res_web.text)
                 
-                # NUOVO FILTRO: Esclusione file statici E indirizzi PEC
                 esclusioni_file = ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.js', '.css', 'sentry.io')
                 esclusioni_pec = ['pec@', '@pec', '.pec.', 'legalmail', 'postacert', 'certificata', 'sicurezzapostale', 'telecompost', '@cert.']
                 
@@ -186,7 +185,7 @@ def main():
                 
                 prompt_web = f"""
                 Analizza questo testo di una pagina web per una società di ricerca agenti.
-                Estrai 3 informazioni chiave in modo sintetico:
+                Estrai 7 informazioni chiave in modo sintetico:
                 
                 1. ESITO: Classifica in "AGENTE" (se cercano P.IVA e sono mandanti validi) o "DIPENDENTE".
                 REGOLE DI ESCLUSIONE - Se rientra qui scrivi "ESCLUSO":
@@ -199,8 +198,13 @@ def main():
                 
                 2. NOME_AZIENDA: VERO nome del brand/azienda mandante. (Se ESCLUSO scrivi SCONOSCIUTO).
                 3. EMAIL: Indirizzo email di contatto. (Nota: ho estratto questa email nascosta dal codice sorgente: {email_suggerita}. Usala come prima scelta valida. Se non c'è, cercala nel testo. Se completamente assente scrivi NESSUNA).
+                4. SETTORE: Breve specifica del settore nel quale opera l'azienda. Se non chiaro scrivi "--".
+                5. TELEFONO: Numero di telefono principale. Escludi numeri di FAX o numeri di assistenza tecnica. Se non lo trovi scrivi "--".
+                6. CITTA: La città della sede. Se non è un capoluogo di provincia, aggiungi la sigla della provincia (es. "BUSTO ARSIZIO VA"). Se non la trovi scrivi "--".
+                7. REGIONE: Lo Stato/Regione (es. Lombardia, Piemonte). Se non la trovi scrivi "--".
                 
-                Rispondi su una sola riga: ESITO | NOME_AZIENDA | EMAIL
+                Rispondi ESATTAMENTE su una sola riga usando il separatore | tra i campi.
+                Formato richiesto: ESITO | NOME_AZIENDA | EMAIL | SETTORE | TELEFONO | CITTA | REGIONE
                 
                 Testo: {testo}
                 """
@@ -209,21 +213,24 @@ def main():
                 max_tentativi = 3
                 for t in range(max_tentativi):
                     try:
-                        # --- AGGIORNAMENTO A GEMINI 3.6 FLASH ---
                         risposta = client.models.generate_content(model='gemini-3.6-flash', contents=prompt_web)
+                        
                         parti = risposta.text.strip().replace("*", "").split('|')
                         
-                        esito = parti[0].strip().upper()
+                        esito = parti[0].strip().upper() if len(parti) > 0 else "SCONOSCIUTO"
                         nome_reale = parti[1].strip() if len(parti) > 1 else "SCONOSCIUTO"
                         email = parti[2].strip().lower() if len(parti) > 2 else "NESSUNA"
+                        settore = parti[3].strip() if len(parti) > 3 else "--"
+                        telefono = parti[4].strip() if len(parti) > 4 else "--"
+                        citta = parti[5].strip() if len(parti) > 5 else "--"
+                        regione = parti[6].strip() if len(parti) > 6 else "--"
                         break 
                     except Exception as e_ia:
                         if t < max_tentativi - 1: time.sleep(30)
                         else: raise e_ia
                 
-                # UPDATE A PACCHETTO: 1 sola chiamata per risparmiare quote Google Sheets
                 worksheet_master.update(values=[[titolo, esito, data_odierna]], range_name=f"C{numero_riga}:E{numero_riga}")
-                time.sleep(1.5) # Micro-pausa per mantenere la calma di Google
+                time.sleep(1.5) 
                 
                 if "AGENTE" in esito:
                     dominio = urlparse(url_sito).netloc.replace('www.', '')
@@ -234,29 +241,28 @@ def main():
                     if esiste_in_crm:
                         stato_crm = "Già in HubSpot"
                     else:
-                        stato_crm = crea_hubspot_contact(nome_reale, url_sito, email, nome_dm, ruolo_dm, email_dm)
+                        stato_crm = crea_hubspot_contact(nome_reale, url_sito, email, nome_dm, ruolo_dm, email_dm, settore, telefono, citta, regione)
                         
                     referente_completo = f"{nome_dm.upper()} {ruolo_dm.upper()}".strip() if nome_dm != "SCONOSCIUTO" else ""
                     email_referente_finale = email_dm if email_dm != "nessuna" else ""
                     email_azienda_finale = email if email != "nessuna" else ""
                     
                     nuova_riga = [
-                        nome_reale.upper(),         # Colonna A
-                        url_sito,                   # Colonna B
-                        titolo,                     # Colonna C
-                        esito,                      # Colonna D
-                        stato_crm,                  # Colonna E
-                        email_azienda_finale,       # Colonna F
-                        referente_completo,         # Colonna G (Referente)
-                        email_referente_finale,     # Colonna H (Email Referente)
-                        data_odierna                # Colonna I (Data)
+                        nome_reale.upper(),
+                        url_sito,
+                        titolo,
+                        esito,
+                        stato_crm,
+                        email_azienda_finale,
+                        referente_completo,
+                        email_referente_finale,
+                        data_odierna
                     ]
                     worksheet_assistente.append_row(nuova_riga)
                 
             except Exception as e:
-                # UPDATE A PACCHETTO ANCHE PER L'ERRORE: riduce del 50% il carico su Google
                 worksheet_master.update(values=[["ERRORE", data_odierna]], range_name=f"D{numero_riga}:E{numero_riga}")
-                time.sleep(1.5) # Micro-pausa per l'errore
+                time.sleep(1.5)
 
 if __name__ == "__main__":
     main()
