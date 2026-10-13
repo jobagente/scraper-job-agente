@@ -29,13 +29,12 @@ except Exception as e:
 # MOTORE COMBINATORIO DINAMICO (Focalizzato su Aziende Mandanti B2B)
 azioni = [
     '"ricerca agenti"', '"cerchiamo agenti"', '"selezioniamo agenti"', 
-    '"lavora con noi" "agente di commercio"', '"posizioni aperte" "agente"', 
-    '"ricerca procacciatori"', '"invia cv" "agente"', '"rete vendita" "lavora con noi"',
+    '"lavora con noi" agente', '"posizioni aperte" agente', 
+    '"ricerca procacciatori"', '"invia cv" agente', '"rete vendita" "lavora con noi"',
     '"opportunità per agenti"', '"ricerca rappresentanti"', '"agenti plurimandatari"',
     '"agenti monomandatari"', '"ampliamento rete vendita"', '"cerca agenti"'
 ]
 
-# Rimossi "energia" e "telecomunicazioni" (esclusi da main.py) e aggiunti settori B2B reali
 settori = [
     "medicale", "software", "horeca", "edilizia", "industriale", "b2b",
     "farmaceutico", "automazione", "logistica", "alimentare", "servizi alle imprese", 
@@ -74,7 +73,6 @@ siti_da_escludere = [
     'intervieweb', 'provincia.', 'giurcost', 'esselungajob',
     'nettowork', 'bebee', 'umana', 'studiostella', 'studiogiudice', 
     'saviglianoformazione', 'comune.', 'business.telecomitalia.it',
-    # Nuove esclusioni dai log reali di Foglio1
     'expertini', 'lavoroeconcorsi', 'jobssjob', 'recruit.net', 'agentworkhub',
     'teamtailor', 'oraclecloud', 'carusihr', 'confartigianato', 'confindustria',
     'cna.it', 'casa.it', 'immobiliare', 'tecnocasa', 'tempocasa', 'gabetti',
@@ -82,7 +80,6 @@ siti_da_escludere = [
     'verisure', 'venditoriadistanza', 'x.com', 'twitter.com', '.blog/'
 ]
 
-# Percorsi URL da scartare perché non sono pagine "Lavora con noi" di aziende
 path_da_escludere = [
     '/sitemap', '/blog/', '/news/', '/category/', '/tag/', '/author/', 
     '/articolo/', '/economia/', '/storia-', '/incontri'
@@ -101,7 +98,7 @@ def main():
     dati_da_inserire = []
     combinazioni_usate = set()
 
-    for _ in range(50):
+    for _ in range(65):
         azione = random.choice(azioni)
         settore = random.choice(settori)
         provincia = random.choice(province)
@@ -112,24 +109,32 @@ def main():
             continue
         combinazioni_usate.add(chiave_combo)
         
-        query = f'{azione} {settore} {provincia} -immobiliare -assicurativo -franchising -associazione -corsi -incontri'
+        query = f'{azione} {settore} {provincia} -immobiliare -franchising -associazione -corsi'
         print(f"Eseguo query mirata (Pag. {pagina}): {query}")
         
         url = "https://google.serper.dev/search"
-        payload = json.dumps({
+        
+        # NESSUN parametro "num" (che causa errore 400 su Serper)
+        payload_dict = {
             "q": query,
             "gl": "it",
-            "hl": "it",
-            "num": 20,
-            "page": pagina
-        })
+            "hl": "it"
+        }
+        if pagina > 1:
+            payload_dict["page"] = pagina
+            
         headers = {
             'X-API-KEY': serper_api_key,
             'Content-Type': 'application/json'
         }
         
         try:
-            response = requests.request("POST", url, headers=headers, data=payload, timeout=15)
+            response = requests.post(url, headers=headers, data=json.dumps(payload_dict), timeout=15)
+            # Se page=2 non fosse supportato, riprova subito senza page
+            if response.status_code == 400 and "page" in payload_dict:
+                del payload_dict["page"]
+                response = requests.post(url, headers=headers, data=json.dumps(payload_dict), timeout=15)
+                
             response.raise_for_status()
             data = response.json()
             
@@ -147,12 +152,10 @@ def main():
                 if not link or link.endswith(('.pdf', '.doc', '.docx', '.xls', '.xlsx')):
                     continue
                     
-                # Salta se il titolo contiene parole di annunci immobiliari o spam
                 titolo_lower = titolo.lower()
                 if any(p in titolo_lower for p in ['immobiliare', 'incontri', 'cerco ragazza', 'trans ', 'concorso pubblico']):
                     continue
                     
-                # Salta se il percorso dell'URL è una sitemap o un articolo di blog/news
                 if any(path_vietato in link for path_vietato in path_da_escludere):
                     continue
                     
@@ -167,7 +170,7 @@ def main():
                     break
                     
         except requests.exceptions.HTTPError as err:
-            print(f"Errore HTTP da Serper: {err}")
+            print(f"Errore HTTP da Serper: {err} - Risposta: {response.text}")
         except Exception as e:
             print(f"Errore ricerca: {e}")
             
