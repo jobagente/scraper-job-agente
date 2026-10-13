@@ -3,12 +3,15 @@ import json
 import time
 import re
 import requests
+import urllib3
 import gspread
 from bs4 import BeautifulSoup
 from google import genai
 from google.oauth2.service_account import Credentials
 from urllib.parse import urlparse
 from datetime import datetime
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 creds_json = os.environ.get('GCP_CREDENTIALS')
 gemini_api_key = os.environ.get('GEMINI_API_KEY')
@@ -20,6 +23,12 @@ scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapi
 creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
 gc = gspread.authorize(creds)
 client = genai.Client(api_key=gemini_api_key)
+
+HEADERS_BROWSER = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7'
+}
 
 def check_hubspot_contact(dominio, nome_azienda):
     if not hubspot_token: return False
@@ -35,7 +44,7 @@ def check_hubspot_contact(dominio, nome_azienda):
         ]
     }
     try:
-        res = requests.post(url, headers=headers, json=payload)
+        res = requests.post(url, headers=headers, json=payload, timeout=15)
         if res.status_code == 200:
             return res.json().get('total', 0) > 0
     except: pass
@@ -74,7 +83,7 @@ def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_
         
     try:
         url_cont = "https://api.hubapi.com/crm/v3/objects/contacts"
-        res = requests.post(url_cont, headers=headers, json={"properties": properties})
+        res = requests.post(url_cont, headers=headers, json={"properties": properties}, timeout=15)
         if res.status_code in (200, 201):
             return "Inserito in HubSpot"
         else:
@@ -83,34 +92,27 @@ def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_
     except Exception as e:
         return f"Errore CRM"
 
-# =======================================================
-# MOTORE DI RICERCA DATI AZIENDALI POTENZIATO
-# =======================================================
 def cerca_dati_aziendali_osint(nome_azienda):
     if not serper_api_key or nome_azienda == "SCONOSCIUTO": return None, None
         
     url = "https://google.serper.dev/search"
-    # Pulizia del nome rimuovendo SRL, SPA, ecc. per favorire l'algoritmo di Google
     azienda_pulita = re.sub(r'(?i)\b(s\.r\.l\.|srl|s\.p\.a\.|spa|s\.n\.c\.|snc|s\.a\.s\.|sas)\b', '', nome_azienda).strip()
     
-    # Query secca, solo il nome dell'azienda, fa apparire la scheda quasi sempre
     payload = json.dumps({"q": azienda_pulita, "gl": "it", "hl": "it"})
     headers = {'X-API-KEY': serper_api_key, 'Content-Type': 'application/json'}
     
     try:
-        res = requests.post(url, headers=headers, data=payload)
+        res = requests.post(url, headers=headers, data=payload, timeout=15)
         if res.status_code == 200:
             data = res.json()
             telefono = None
             indirizzo = None
             
-            # 1. Ricerca nella Scheda principale (Knowledge Graph)
             kg = data.get('knowledgeGraph', {})
             if kg:
                 telefono = kg.get('phoneNumber')
                 indirizzo = kg.get('address')
                 
-                # Se il telefono non è nel campo principale, controlliamo negli attributi nascosti
                 if not telefono:
                     attr = kg.get('attributes', {})
                     for key, val in attr.items():
@@ -118,7 +120,6 @@ def cerca_dati_aziendali_osint(nome_azienda):
                             telefono = val
                             break
             
-            # 2. Se manca ancora qualcosa, proviamo nei risultati della mappa (Places)
             if not telefono or not indirizzo:
                 places = data.get('places', [])
                 for place in places:
@@ -126,7 +127,6 @@ def cerca_dati_aziendali_osint(nome_azienda):
                         telefono = place.get('phoneNumber')
                     if not indirizzo and place.get('address'):
                         indirizzo = place.get('address')
-                    # Se li abbiamo trovati entrambi, possiamo smettere di cercare
                     if telefono and indirizzo:
                         break
                         
@@ -157,7 +157,7 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
     headers = {'X-API-KEY': serper_api_key, 'Content-Type': 'application/json'}
     
     try:
-        res = requests.post(url, headers=headers, data=payload)
+        res = requests.post(url, headers=headers, data=payload, timeout=15)
         if res.status_code != 200: return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
         
         risultati = res.json().get('organic', [])
@@ -216,13 +216,13 @@ def main():
         url_sito = riga[1].strip()
         esito_attuale = riga[3].strip() if len(riga) > 3 else ""
 
-        if url_sito and (not esito_attuale or "ERRORE" in esito_attuale):
+        # Processa SOLO le righe nuove (con Esito vuoto), evitando il loop sulle vecchie righe in ERRORE
+        if url_sito and not esito_attuale:
             numero_riga = i + 1
             print(f"Processo riga {numero_riga}: {url_sito}")
             
             try:
-                headers = {'User-Agent': 'Mozilla/5.0'}
-                res_web = requests.get(url_sito, headers=headers, timeout=15)
+                res_web = requests.get(url_sito, headers=HEADERS_BROWSER, timeout=15, verify=False)
                 res_web.raise_for_status()
                 
                 emails_trovate = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', res_web.text)
