@@ -26,25 +26,30 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit()
 
-# MOTORE COMBINATORIO DINAMICO
+# MOTORE COMBINATORIO DINAMICO (Focalizzato su Aziende Mandanti B2B)
 azioni = [
     '"ricerca agenti"', '"cerchiamo agenti"', '"selezioniamo agenti"', 
-    '"lavora con noi" agente', '"posizioni aperte" commerciale', 
-    '"ricerca procacciatori"', '"invia cv" agente', '"selezione commerciali"',
-    '"opportunità per agenti"', '"ricerca rappresentanti"'
+    '"lavora con noi" "agente di commercio"', '"posizioni aperte" "agente"', 
+    '"ricerca procacciatori"', '"invia cv" "agente"', '"rete vendita" "lavora con noi"',
+    '"opportunità per agenti"', '"ricerca rappresentanti"', '"agenti plurimandatari"',
+    '"agenti monomandatari"', '"ampliamento rete vendita"', '"cerca agenti"'
 ]
 
+# Rimossi "energia" e "telecomunicazioni" (esclusi da main.py) e aggiunti settori B2B reali
 settori = [
     "medicale", "software", "horeca", "edilizia", "industriale", "b2b",
     "farmaceutico", "automazione", "logistica", "alimentare", "servizi alle imprese", 
-    "telecomunicazioni", "arredamento", "energia", "impiantistica", "cosmesi", 
-    "meccanica", "agricoltura", "ferramenta", "hitech", "packaging", "plastica"
+    "arredamento", "impiantistica", "cosmesi", "meccanica", "agricoltura", 
+    "ferramenta", "packaging", "plastica", "chimica", "utensileria", 
+    "termoidraulica", "illuminazione", "serramenti", "antinfortunistica", 
+    "forniture industriali", "macchinari", "oleodinamica", "elettrotecnica"
 ]
 
 province = [
     "Milano", "Brescia", "Verona", "Torino", "Bologna", "Roma", "Padova", "Vicenza", 
     "Treviso", "Bergamo", "Firenze", "Napoli", "Varese", "Monza", "Como", "Modena", 
-    "Parma", "Reggio Emilia", "Cuneo", "Udine", "Pordenone"
+    "Parma", "Reggio Emilia", "Cuneo", "Udine", "Pordenone", "Lecco", "Novara",
+    "Mantova", "Cremona", "Piacenza", "Rimini", "Ancona", "Bari", "Busto Arsizio"
 ]
 
 siti_da_escludere = [
@@ -68,7 +73,19 @@ siti_da_escludere = [
     'hrspecialistitalia', 'profiliecarriere', 'samsic-hr', 'lavorai', 'joinrs',
     'intervieweb', 'provincia.', 'giurcost', 'esselungajob',
     'nettowork', 'bebee', 'umana', 'studiostella', 'studiogiudice', 
-    'saviglianoformazione', 'comune.', 'business.telecomitalia.it'
+    'saviglianoformazione', 'comune.', 'business.telecomitalia.it',
+    # Nuove esclusioni dai log reali di Foglio1
+    'expertini', 'lavoroeconcorsi', 'jobssjob', 'recruit.net', 'agentworkhub',
+    'teamtailor', 'oraclecloud', 'carusihr', 'confartigianato', 'confindustria',
+    'cna.it', 'casa.it', 'immobiliare', 'tecnocasa', 'tempocasa', 'gabetti',
+    'remax', 'toscano.it', 'engelvoelkers', 'paginebianche', 'paginegialle',
+    'verisure', 'venditoriadistanza', 'x.com', 'twitter.com', '.blog/'
+]
+
+# Percorsi URL da scartare perché non sono pagine "Lavora con noi" di aziende
+path_da_escludere = [
+    '/sitemap', '/blog/', '/news/', '/category/', '/tag/', '/author/', 
+    '/articolo/', '/economia/', '/storia-', '/incontri'
 ]
 
 def main():
@@ -78,25 +95,33 @@ def main():
     domini_inseriti = set()
     for link in colonna_b[1:]:
         if link:
-            dominio = urlparse(link).netloc.replace('www.', '')
+            dominio = urlparse(link).netloc.replace('www.', '').lower()
             domini_inseriti.add(dominio)
             
     dati_da_inserire = []
+    combinazioni_usate = set()
 
-    for _ in range(45):
+    for _ in range(50):
         azione = random.choice(azioni)
         settore = random.choice(settori)
         provincia = random.choice(province)
+        pagina = random.choice([1, 2])
         
-        query = f'{azione} {settore} {provincia} -franchising -associazione -corsi'
-        print(f"Eseguo query mirata: {query}")
+        chiave_combo = f"{azione}_{settore}_{provincia}_{pagina}"
+        if chiave_combo in combinazioni_usate:
+            continue
+        combinazioni_usate.add(chiave_combo)
+        
+        query = f'{azione} {settore} {provincia} -immobiliare -assicurativo -franchising -associazione -corsi -incontri'
+        print(f"Eseguo query mirata (Pag. {pagina}): {query}")
         
         url = "https://google.serper.dev/search"
-        # RIMOSSO IL PARAMETRO "num": 100 CHE CAUSAVA L'ERRORE 400
         payload = json.dumps({
             "q": query,
             "gl": "it",
-            "hl": "it"
+            "hl": "it",
+            "num": 20,
+            "page": pagina
         })
         headers = {
             'X-API-KEY': serper_api_key,
@@ -104,27 +129,39 @@ def main():
         }
         
         try:
-            response = requests.request("POST", url, headers=headers, data=payload)
+            response = requests.request("POST", url, headers=headers, data=payload, timeout=15)
             response.raise_for_status()
             data = response.json()
             
             risultati = data.get('organic', [])
             if not risultati:
                 print("Nessun risultato utile.")
-                time.sleep(3)
+                time.sleep(2)
                 continue
             
             for item in risultati:
                 titolo = item.get('title', 'Sito Aziendale')
-                link = item.get('link', '').lower()
+                link_originale = item.get('link', '')
+                link = link_originale.lower()
                 
-                if link and not link.endswith('.pdf'):
-                    dominio_estratto = urlparse(link).netloc.replace('www.', '')
+                if not link or link.endswith(('.pdf', '.doc', '.docx', '.xls', '.xlsx')):
+                    continue
                     
-                    if not any(sito_vietato in link for sito_vietato in siti_da_escludere):
-                        if dominio_estratto not in domini_inseriti:
-                            dati_da_inserire.append([titolo, item.get('link', '')])
-                            domini_inseriti.add(dominio_estratto) 
+                # Salta se il titolo contiene parole di annunci immobiliari o spam
+                titolo_lower = titolo.lower()
+                if any(p in titolo_lower for p in ['immobiliare', 'incontri', 'cerco ragazza', 'trans ', 'concorso pubblico']):
+                    continue
+                    
+                # Salta se il percorso dell'URL è una sitemap o un articolo di blog/news
+                if any(path_vietato in link for path_vietato in path_da_escludere):
+                    continue
+                    
+                dominio_estratto = urlparse(link).netloc.replace('www.', '')
+                
+                if not any(sito_vietato in link for sito_vietato in siti_da_escludere):
+                    if dominio_estratto and dominio_estratto not in domini_inseriti:
+                        dati_da_inserire.append([titolo, link_originale])
+                        domini_inseriti.add(dominio_estratto)
                 
                 if len(dati_da_inserire) >= 100:
                     break
@@ -137,12 +174,14 @@ def main():
         if len(dati_da_inserire) >= 100:
             break
             
-        time.sleep(3)
+        time.sleep(2)
 
     if dati_da_inserire:
         intervallo = f"A{prima_riga_vuota}:B{prima_riga_vuota + len(dati_da_inserire) - 1}"
         worksheet.update(values=dati_da_inserire, range_name=intervallo)
-        print(f"Aggiunti {len(dati_da_inserire)} prospect mandanti!")
+        print(f"Aggiunti {len(dati_da_inserire)} prospect mandanti puliti!")
+    else:
+        print("Nessun nuovo prospect trovato in questa sessione.")
 
 if __name__ == "__main__":
     main()
