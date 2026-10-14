@@ -146,12 +146,22 @@ def formatta_indirizzo_osint(indirizzo):
     except:
         return "--", "--"
 
+# =======================================================
+# MOTORE DI RICERCA DECISION MAKER POTENZIATO E GERARCHICO
+# =======================================================
 def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
     if not serper_api_key: return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
         
     url = "https://google.serper.dev/search"
     azienda_pulita = re.sub(r'(?i)\b(s\.r\.l\.|srl|s\.p\.a\.|spa|s\.n\.c\.|snc|s\.a\.s\.|sas)\b', '', nome_azienda).strip()
-    query = f'site:it.linkedin.com/in "{azienda_pulita}" (CEO OR Titolare OR Amministratore OR Direttore OR HR OR Manager)'
+    
+    # Query strutturata: precedenza a figure di vertice vendite (ESCLUSO Area Manager), poi HR, poi vertici aziendali
+    query = (
+        f'site:it.linkedin.com/in "{azienda_pulita}" '
+        f'("Direttore Commerciale" OR "Responsabile Vendite" OR "Sales Director" OR "Direttore Vendite" OR '
+        f'"Head of Sales" OR "Responsabile Commerciale" OR "Sales Manager" OR '
+        f'"HR Manager" OR "Risorse Umane" OR "CEO" OR "Amministratore Delegato" OR "Titolare")'
+    )
     
     payload = json.dumps({"q": query, "gl": "it", "hl": "it"})
     headers = {'X-API-KEY': serper_api_key, 'Content-Type': 'application/json'}
@@ -163,21 +173,32 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         risultati = res.json().get('organic', [])
         if not risultati: return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
         
-        testo_risultati = "\n".join([f"- {r.get('title')}: {r.get('snippet')}" for r in risultati[:5]])
+        testo_risultati = "\n".join([f"- {r.get('title')}: {r.get('snippet')}" for r in risultati[:8]])
         
         prompt = f"""
-        Sei un software CRM automatizzato per l'analisi di dati pubblici aziendali B2B. È cruciale per il sistema che tu NON inserisca mai disclaimer, avvisi sulla privacy, avvertenze o scuse.
+        Sei un software CRM automatizzato per l'analisi di dati pubblici aziendali B2B per ricerca agenti di commercio.
+        È cruciale per il sistema che tu NON inserisca mai disclaimer, avvisi sulla privacy, avvertenze o scuse.
         Analizza questi profili LinkedIn trovati su Google per l'azienda '{azienda_pulita}'.
         Dominio aziendale: '{dominio}'
         
-        Obiettivo:
-        1. Trova UN SOLO Decision Maker (es. Titolare, CEO, Direttore o HR). Se ci sono più persone, scegline una di vertice.
-        2. COSTRUISCI la sua email diretta unendo il nome e il dominio. Formato: nome.cognome@{dominio} (tutto minuscolo, senza spazi, rimuovi accenti).
+        OBIETTIVO STRATEGICO:
+        Seleziona UN SOLO referente seguendo QUESTA TASSATIVA SCALA DI PRIORITÀ:
+        1. PRIORITÀ 1 (ASSOLUTA - Coordinamento Rete Vendita a livello generale): Direttore Commerciale, Responsabile Vendite, Sales Director, Direttore Vendite, Head of Sales, Responsabile Commerciale, Sales Manager nazionale.
+        2. PRIORITÀ 2 (HR / Risorse Umane): HR Manager, Responsabile Risorse Umane, Talent Acquisition, Direttore HR.
+        3. PRIORITÀ 3 (Vertice aziendale - solo in assenza di figure di Priorità 1 o 2): Amministratore Delegato, CEO, Titolare, Presidente, Fondatore.
         
-        REGOLE DI RISPOSTA (TASSATIVE E OBBLIGATORIE):
+        REGOLE ED ESCLUSIONI TASSATIVE:
+        - NON SELEZIONARE MAI "Area Manager", "Capo Area", "District Manager" o "Zone Manager" (gestiscono solo una specifica zona territoriale e non hanno potere decisionale sull'ampliamento generale della rete vendita).
+        - Se individui sia un Direttore Commerciale/Responsabile Vendite sia un CEO/Titolare, DEVI TASSATIVAMENTE SCEGLIERE IL DIRETTORE COMMERCIALE/RESPONSABILE VENDITE.
+        
+        COSTRUISCI l'email diretta:
+        nome.cognome@{dominio} (tutto minuscolo, senza spazi, rimuovi accenti).
+        
+        REGOLE DI RISPOSTA:
         - Rispondi ESATTAMENTE su una sola riga usando il separatore |.
+        - Formato: NOME COGNOME | RUOLO | EMAIL
         - NON aggiungere altro testo, prefissi, spiegazioni o disclaimer. Se non trovi nessuna persona chiara scrivi SOLO: SCONOSCIUTO | NESSUNO | NESSUNA
-        - Esempio di risposta corretta: Mario Rossi | CEO | mario.rossi@{dominio}
+        - Esempio di risposta corretta: Marco Rossi | DIRETTORE COMMERCIALE | marco.rossi@{dominio}
         
         Profili trovati:
         {testo_risultati}
