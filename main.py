@@ -30,17 +30,21 @@ HEADERS_BROWSER = {
     'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7'
 }
 
+def pulisci_nome_azienda(nome):
+    if not nome: return ""
+    return re.sub(r'(?i)\b(s\.r\.l\.|srl|s\.p\.a\.|spa|s\.n\.c\.|snc|s\.a\.s\.|sas|s\.r\.l\.s\.|srls|unipersonale)\b', '', nome).strip().upper()
+
 def check_hubspot_contact(dominio, nome_azienda):
     if not hubspot_token: return False
     url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
     headers = {'Authorization': f'Bearer {hubspot_token}', 'Content-Type': 'application/json'}
     
-    azienda_pulita = re.sub(r'(?i)\b(s\.r\.l\.|srl|s\.p\.a\.|spa|s\.n\.c\.|snc|s\.a\.s\.|sas)\b', '', nome_azienda).strip()
+    azienda_pulita = pulisci_nome_azienda(nome_azienda)
     
     payload = {
         "filterGroups": [
             {"filters": [{"propertyName": "website", "operator": "CONTAINS_TOKEN", "value": dominio}]},
-            {"filters": [{"propertyName": "company", "operator": "CONTAINS_TOKEN", "value": azienda_pulita.upper()}]}
+            {"filters": [{"propertyName": "company", "operator": "CONTAINS_TOKEN", "value": azienda_pulita}]}
         ]
     }
     try:
@@ -96,7 +100,7 @@ def cerca_dati_aziendali_osint(nome_azienda):
     if not serper_api_key or nome_azienda == "SCONOSCIUTO": return None, None
         
     url = "https://google.serper.dev/search"
-    azienda_pulita = re.sub(r'(?i)\b(s\.r\.l\.|srl|s\.p\.a\.|spa|s\.n\.c\.|snc|s\.a\.s\.|sas)\b', '', nome_azienda).strip()
+    azienda_pulita = pulisci_nome_azienda(nome_azienda)
     
     payload = json.dumps({"q": azienda_pulita, "gl": "it", "hl": "it"})
     headers = {'X-API-KEY': serper_api_key, 'Content-Type': 'application/json'}
@@ -146,16 +150,12 @@ def formatta_indirizzo_osint(indirizzo):
     except:
         return "--", "--"
 
-# =======================================================
-# MOTORE DI RICERCA DECISION MAKER POTENZIATO E GERARCHICO
-# =======================================================
 def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
     if not serper_api_key: return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
         
     url = "https://google.serper.dev/search"
-    azienda_pulita = re.sub(r'(?i)\b(s\.r\.l\.|srl|s\.p\.a\.|spa|s\.n\.c\.|snc|s\.a\.s\.|sas)\b', '', nome_azienda).strip()
+    azienda_pulita = pulisci_nome_azienda(nome_azienda)
     
-    # Query strutturata: precedenza a figure di vertice vendite (ESCLUSO Area Manager), poi HR, poi vertici aziendali
     query = (
         f'site:it.linkedin.com/in "{azienda_pulita}" '
         f'("Direttore Commerciale" OR "Responsabile Vendite" OR "Sales Director" OR "Direttore Vendite" OR '
@@ -228,7 +228,21 @@ def main():
     except Exception as e: return
 
     dati = worksheet_master.get_all_values()
+    dati_prospect = worksheet_assistente.get_all_values()
     data_odierna = datetime.now().strftime('%d/%m/%Y')
+    
+    # =======================================================
+    # CARICAMENTO STORICO "NUOVI PROSPECT" ANTI-DOPPIONI
+    # =======================================================
+    aziende_gia_in_prospect = set()
+    domini_gia_in_prospect = set()
+    for r_p in dati_prospect[1:]:
+        if len(r_p) > 0 and r_p[0].strip():
+            aziende_gia_in_prospect.add(pulisci_nome_azienda(r_p[0]))
+        if len(r_p) > 1 and r_p[1].strip():
+            dom_p = urlparse(r_p[1].strip()).netloc.replace('www.', '').lower()
+            if dom_p:
+                domini_gia_in_prospect.add(dom_p)
     
     for i in range(1, len(dati)):
         riga = dati[i]
@@ -237,9 +251,17 @@ def main():
         url_sito = riga[1].strip()
         esito_attuale = riga[3].strip() if len(riga) > 3 else ""
 
-        # Processa SOLO le righe nuove (con Esito vuoto), evitando il loop sulle vecchie righe in ERRORE
         if url_sito and not esito_attuale:
             numero_riga = i + 1
+            dominio = urlparse(url_sito).netloc.replace('www.', '').lower()
+            
+            # CONTROLLO DOPPIONI 1 (Sul dominio prima dello scraping)
+            if dominio in domini_gia_in_prospect:
+                print(f"Salto riga {numero_riga} ({dominio}): dominio già presente in Nuovi Prospect.")
+                worksheet_master.update(values=[["Già in Nuovi Prospect", "DUPLICATO", data_odierna]], range_name=f"C{numero_riga}:E{numero_riga}")
+                time.sleep(1.5)
+                continue
+
             print(f"Processo riga {numero_riga}: {url_sito}")
             
             try:
@@ -315,7 +337,13 @@ def main():
                 time.sleep(1.5) 
                 
                 if "AGENTE" in esito:
-                    dominio = urlparse(url_sito).netloc.replace('www.', '')
+                    nome_pulito = pulisci_nome_azienda(nome_reale)
+                    
+                    # CONTROLLO DOPPIONI 2 (Sul nome azienda estratto e sul dominio)
+                    if (nome_pulito and nome_pulito in aziende_gia_in_prospect) or (dominio in domini_gia_in_prospect):
+                        print(f"Salto inserimento {nome_reale}: già presente in Nuovi Prospect.")
+                        continue
+
                     esiste_in_crm = check_hubspot_contact(dominio, nome_reale)
                     
                     nome_dm, ruolo_dm, email_dm = cerca_decision_maker_osint(nome_reale, dominio, email)
@@ -355,6 +383,11 @@ def main():
                         data_odierna
                     ]
                     worksheet_assistente.append_row(nuova_riga)
+                    
+                    # Registra subito in memoria l'azienda appena aggiunta per bloccare doppioni nella stessa sessione
+                    if nome_pulito:
+                        aziende_gia_in_prospect.add(nome_pulito)
+                    domini_gia_in_prospect.add(dominio)
                 
             except Exception as e:
                 worksheet_master.update(values=[["ERRORE", data_odierna]], range_name=f"D{numero_riga}:E{numero_riga}")
