@@ -22,11 +22,11 @@ URL_FOGLIO = "https://docs.google.com/spreadsheets/d/15K6_SNBTB-QBNwFB2L6Qjrd56w
 try:
     sh = gc.open_by_url(URL_FOGLIO)
     worksheet = sh.sheet1
+    worksheet_prospect = sh.worksheet("Nuovi Prospect")
 except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit()
 
-# MOTORE COMBINATORIO DINAMICO (Focalizzato su Aziende Mandanti B2B)
 azioni = [
     '"ricerca agenti"', '"cerchiamo agenti"', '"selezioniamo agenti"', 
     '"lavora con noi" agente', '"posizioni aperte" agente', 
@@ -86,14 +86,17 @@ path_da_escludere = [
 ]
 
 def main():
-    colonna_b = worksheet.col_values(2)
-    prima_riga_vuota = len(colonna_b) + 1
+    colonna_b_master = worksheet.col_values(2)
+    colonna_b_prospect = worksheet_prospect.col_values(2)
+    prima_riga_vuota = len(colonna_b_master) + 1
     
+    # CONTROLLO ANTI-DOPPIONI: legge i domini sia da Foglio1 sia da Nuovi Prospect
     domini_inseriti = set()
-    for link in colonna_b[1:]:
+    for link in colonna_b_master[1:] + colonna_b_prospect[1:]:
         if link:
-            dominio = urlparse(link).netloc.replace('www.', '').lower()
-            domini_inseriti.add(dominio)
+            dominio = urlparse(link.strip()).netloc.replace('www.', '').lower()
+            if dominio:
+                domini_inseriti.add(dominio)
             
     dati_da_inserire = []
     combinazioni_usate = set()
@@ -113,8 +116,6 @@ def main():
         print(f"Eseguo query mirata (Pag. {pagina}): {query}")
         
         url = "https://google.serper.dev/search"
-        
-        # NESSUN parametro "num" (che causa errore 400 su Serper)
         payload_dict = {
             "q": query,
             "gl": "it",
@@ -130,7 +131,6 @@ def main():
         
         try:
             response = requests.post(url, headers=headers, data=json.dumps(payload_dict), timeout=15)
-            # Se page=2 non fosse supportato, riprova subito senza page
             if response.status_code == 400 and "page" in payload_dict:
                 del payload_dict["page"]
                 response = requests.post(url, headers=headers, data=json.dumps(payload_dict), timeout=15)
@@ -159,7 +159,7 @@ def main():
                 if any(path_vietato in link for path_vietato in path_da_escludere):
                     continue
                     
-                dominio_estratto = urlparse(link).netloc.replace('www.', '')
+                dominio_estratto = urlparse(link).netloc.replace('www.', '').lower()
                 
                 if not any(sito_vietato in link for sito_vietato in siti_da_escludere):
                     if dominio_estratto and dominio_estratto not in domini_inseriti:
