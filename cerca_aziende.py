@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import random
 import time
@@ -6,6 +7,9 @@ import requests
 import gspread
 from urllib.parse import urlparse
 from google.oauth2.service_account import Credentials
+
+# Forza la stampa immediata nei log di GitHub Actions
+sys.stdout.reconfigure(line_buffering=True)
 
 creds_json = os.environ.get('GCP_CREDENTIALS')
 serper_api_key = os.environ.get('SERPER_API_KEY')
@@ -25,7 +29,7 @@ try:
     worksheet_prospect = sh.worksheet("Nuovi Prospect")
 except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
-    exit()
+    exit(1)
 
 azioni = [
     '"ricerca agenti"', '"cerchiamo agenti"', '"selezioniamo agenti"', 
@@ -88,7 +92,6 @@ path_da_escludere = [
 def main():
     colonna_b_master = worksheet.col_values(2)
     colonna_b_prospect = worksheet_prospect.col_values(2)
-    prima_riga_vuota = len(colonna_b_master) + 1
     
     # CONTROLLO ANTI-DOPPIONI: legge i domini sia da Foglio1 sia da Nuovi Prospect
     domini_inseriti = set()
@@ -180,9 +183,12 @@ def main():
         time.sleep(2)
 
     if dati_da_inserire:
-        intervallo = f"A{prima_riga_vuota}:B{prima_riga_vuota + len(dati_da_inserire) - 1}"
-        worksheet.update(values=dati_da_inserire, range_name=intervallo)
-        print(f"Aggiunti {len(dati_da_inserire)} prospect mandanti puliti!")
+        try:
+            # append_rows aggiunge righe automaticamente anche oltre il limite delle 1000 righe!
+            worksheet.append_rows(dati_da_inserire, value_input_option='USER_ENTERED')
+            print(f"✅ Aggiunti con successo {len(dati_da_inserire)} prospect mandanti puliti!")
+        except Exception as e_sheet:
+            print(f"⚠️ Errore durante il salvataggio su Google Sheet: {e_sheet}")
     else:
         print("Nessun nuovo prospect trovato in questa sessione.")
 
