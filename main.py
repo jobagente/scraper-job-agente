@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import time
 import re
@@ -11,6 +12,8 @@ from google.oauth2.service_account import Credentials
 from urllib.parse import urlparse
 from datetime import datetime
 
+# Forza la stampa immediata nei log di GitHub Actions
+sys.stdout.reconfigure(line_buffering=True)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 creds_json = os.environ.get('GCP_CREDENTIALS')
@@ -142,6 +145,7 @@ def formatta_indirizzo_osint(indirizzo):
     if not indirizzo: return "--", "--"
     prompt = f"Estrai Città (con sigla provincia se non è capoluogo) e Regione da questo indirizzo: '{indirizzo}'.\nRispondi ESATTAMENTE su una sola riga nel formato: CITTA | REGIONE\nSe manca un dato scrivi --."
     try:
+        time.sleep(3)
         risposta = client.models.generate_content(model='gemini-3.6-flash', contents=prompt)
         parti = risposta.text.strip().replace("*", "").split('|')
         citta = parti[0].strip().upper() if len(parti) > 0 else "--"
@@ -155,22 +159,25 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         
     url = "https://google.serper.dev/search"
     azienda_pulita = pulisci_nome_azienda(nome_azienda)
-    
-    query = (
-        f'site:it.linkedin.com/in "{azienda_pulita}" '
-        f'("Direttore Commerciale" OR "Responsabile Vendite" OR "Sales Director" OR "Direttore Vendite" OR '
-        f'"Head of Sales" OR "Responsabile Commerciale" OR "Sales Manager" OR '
-        f'"HR Manager" OR "Risorse Umane" OR "CEO" OR "Amministratore Delegato" OR "Titolare")'
-    )
-    
-    payload = json.dumps({"q": query, "gl": "it", "hl": "it"})
     headers = {'X-API-KEY': serper_api_key, 'Content-Type': 'application/json'}
+    
+    # Query snella (sotto il limite di 32 token di Google Search) per catturare tutti i profili rilevanti
+    query = f'site:it.linkedin.com/in "{azienda_pulita}" (Commerciale OR Vendite OR Sales OR Direttore OR HR OR CEO OR Titolare OR Amministratore)'
+    payload = json.dumps({"q": query, "gl": "it", "hl": "it"})
     
     try:
         res = requests.post(url, headers=headers, data=payload, timeout=15)
         if res.status_code != 200: return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
         
         risultati = res.json().get('organic', [])
+        
+        # Fallback automatico: se la query con i ruoli non restituisce risultati, cerca tutti i profili dell'azienda
+        if not risultati:
+            payload_fb = json.dumps({"q": f'site:it.linkedin.com/in "{azienda_pulita}"', "gl": "it", "hl": "it"})
+            res_fb = requests.post(url, headers=headers, data=payload_fb, timeout=15)
+            if res_fb.status_code == 200:
+                risultati = res_fb.json().get('organic', [])
+                
         if not risultati: return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
         
         testo_risultati = "\n".join([f"- {r.get('title')}: {r.get('snippet')}" for r in risultati[:8]])
@@ -183,12 +190,12 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         
         OBIETTIVO STRATEGICO:
         Seleziona UN SOLO referente seguendo QUESTA TASSATIVA SCALA DI PRIORITÀ:
-        1. PRIORITÀ 1 (ASSOLUTA - Coordinamento Rete Vendita a livello generale): Direttore Commerciale, Responsabile Vendite, Sales Director, Direttore Vendite, Head of Sales, Responsabile Commerciale, Sales Manager nazionale.
+        1. PRIORITÀ 1 (ASSOLUTA - Coordinamento Rete Vendita a livello generale): Direttore Commerciale, Responsabile Vendite, Sales Director, Direttore Vendite, Head of Sales, Responsabile Commerciale, Sales Manager.
         2. PRIORITÀ 2 (HR / Risorse Umane): HR Manager, Responsabile Risorse Umane, Talent Acquisition, Direttore HR.
-        3. PRIORITÀ 3 (Vertice aziendale - solo in assenza di figure di Priorità 1 o 2): Amministratore Delegato, CEO, Titolare, Presidente, Fondatore.
+        3. PRIORITÀ 3 (Vertice aziendale - solo in assenza di figure di Priorità 1 o 2): Amministratore Delegato, CEO, Titolare, Presidente, Fondatore, Socio.
         
         REGOLE ED ESCLUSIONI TASSATIVE:
-        - NON SELEZIONARE MAI "Area Manager", "Capo Area", "District Manager" o "Zone Manager" (gestiscono solo una specifica zona territoriale e non hanno potere decisionale sull'ampliamento generale della rete vendita).
+        - NON SELEZIONARE MAI "Area Manager", "Capo Area", "District Manager" o "Zone Manager" (gestiscono solo una specifica zona territoriale).
         - Se individui sia un Direttore Commerciale/Responsabile Vendite sia un CEO/Titolare, DEVI TASSATIVAMENTE SCEGLIERE IL DIRETTORE COMMERCIALE/RESPONSABILE VENDITE.
         
         COSTRUISCI l'email diretta:
@@ -204,18 +211,28 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         {testo_risultati}
         """
         
-        risposta = client.models.generate_content(model='gemini-3.6-flash', contents=prompt)
-        testo_pulito = risposta.text.strip().replace("*", "").replace("Nome:", "").replace("Ruolo:", "").replace("Email:", "")
-        parti = testo_pulito.split('|')
-        
-        nome_dm = parti[0].strip() if len(parti) > 0 else "SCONOSCIUTO"
-        ruolo_dm = parti[1].strip() if len(parti) > 1 else "NESSUNO"
-        email_dm = parti[2].strip().lower() if len(parti) > 2 else "NESSUNA"
-        
-        if "SCONOSCIUTO" in nome_dm.upper() or len(nome_dm) < 3:
-            return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
-            
-        return nome_dm, ruolo_dm, email_dm
+        # Pausa anti-Rate-Limit e retry automatico su Gemini
+        time.sleep(5)
+        for tentativo in range(2):
+            try:
+                risposta = client.models.generate_content(model='gemini-3.6-flash', contents=prompt)
+                testo_pulito = risposta.text.strip().replace("*", "").replace("Nome:", "").replace("Ruolo:", "").replace("Email:", "")
+                parti = testo_pulito.split('|')
+                
+                nome_dm = parti[0].strip() if len(parti) > 0 else "SCONOSCIUTO"
+                ruolo_dm = parti[1].strip() if len(parti) > 1 else "NESSUNO"
+                email_dm = parti[2].strip().lower() if len(parti) > 2 else "NESSUNA"
+                
+                if "SCONOSCIUTO" in nome_dm.upper() or len(nome_dm) < 3:
+                    return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
+                    
+                return nome_dm, ruolo_dm, email_dm
+            except Exception as e_dm:
+                if tentativo == 0:
+                    time.sleep(15)
+                else:
+                    print(f"⚠️ Errore Gemini su referente per {azienda_pulita}: {e_dm}")
+        return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
     except Exception as e:
         return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
 
