@@ -256,12 +256,12 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
 
 # =======================================================
-# FUNZIONE DI INTEGRAZIONE AUTOMATICA CONTATTI SENZA REFERENTE
+# FUNZIONE DI INTEGRAZIONE AUTOMATICA CONTATTI SENZA REFERENTE (ULTIMI 20)
 # =======================================================
 def integra_referenti_mancanti(worksheet_assistente, dati_prospect):
-    print("Verifica ultimi contatti in 'Nuovi Prospect' con referente mancante...")
+    print("Verifica ultimi 20 contatti in 'Nuovi Prospect' con referente mancante...")
     tot_righe = len(dati_prospect)
-    inizio_controllo = max(1, tot_righe - 50)  # Controlla le ultime 50 righe inserite
+    inizio_controllo = max(1, tot_righe - 20)  # Controlla solo le ultime 20 righe inserite
     
     for idx in range(inizio_controllo, tot_righe):
         riga_p = dati_prospect[idx]
@@ -272,7 +272,6 @@ def integra_referenti_mancanti(worksheet_assistente, dati_prospect):
         email_az = riga_p[5].strip().lower() if len(riga_p) > 5 else ""
         referente_att = riga_p[6].strip() if len(riga_p) > 6 else ""
         
-        # Se manca il referente, esegue la ricerca mirata e integra Foglio + HubSpot
         if nome_az and url_az and not referente_att:
             dominio_az = urlparse(url_az).netloc.replace('www.', '').lower()
             print(f"🔄 Integrazione referente mancante per riga {num_riga_sheet}: {nome_az} ({dominio_az})")
@@ -283,10 +282,8 @@ def integra_referenti_mancanti(worksheet_assistente, dati_prospect):
                 ref_completo = f"{nome_dm.upper()} {ruolo_dm.upper()}".strip()
                 email_ref_finale = email_dm if email_dm != "nessuna" else ""
                 
-                # Aggiorna colonne G e H in Nuovi Prospect
                 worksheet_assistente.update(values=[[ref_completo, email_ref_finale]], range_name=f"G{num_riga_sheet}:H{num_riga_sheet}")
                 
-                # Aggiorna anche la scheda contatto già presente in HubSpot
                 contact_id = cerca_id_hubspot_contact(dominio_az, nome_az)
                 if contact_id:
                     aggiorna_hubspot_referente(contact_id, nome_dm, ruolo_dm, email_ref_finale, email_az)
@@ -294,7 +291,6 @@ def integra_referenti_mancanti(worksheet_assistente, dati_prospect):
                 print(f"✅ Integrato con successo: {ref_completo} | {email_ref_finale}")
                 time.sleep(2)
             else:
-                # Segna "--" per non ricontrollarlo all'infinito nei lanci futuri
                 worksheet_assistente.update(values=[["--", "NESSUNA"]], range_name=f"G{num_riga_sheet}:H{num_riga_sheet}")
                 print(f"ℹ️ Nessun profilo LinkedIn pubblico trovato per {nome_az}.")
                 time.sleep(1.5)
@@ -311,7 +307,7 @@ def main():
     dati_prospect = worksheet_assistente.get_all_values()
     data_odierna = datetime.now().strftime('%d/%m/%Y')
     
-    # 1. INTEGRA SUBITO GLI ULTIMI CONTATTI SENZA REFERENTE (FOGLIO + HUBSPOT)
+    # 1. INTEGRA GLI ULTIMI 20 CONTATTI SENZA REFERENTE (FOGLIO + HUBSPOT)
     integra_referenti_mancanti(worksheet_assistente, dati_prospect)
     
     # 2. CARICAMENTO STORICO "NUOVI PROSPECT" ANTI-DOPPIONI
