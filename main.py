@@ -37,11 +37,10 @@ def pulisci_nome_azienda(nome):
     if not nome: return ""
     return re.sub(r'(?i)\b(s\.r\.l\.|srl|s\.p\.a\.|spa|s\.n\.c\.|snc|s\.a\.s\.|sas|s\.r\.l\.s\.|srls|unipersonale)\b', '', nome).strip().upper()
 
-def check_hubspot_contact(dominio, nome_azienda):
-    if not hubspot_token: return False
+def cerca_id_hubspot_contact(dominio, nome_azienda):
+    if not hubspot_token: return None
     url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
     headers = {'Authorization': f'Bearer {hubspot_token}', 'Content-Type': 'application/json'}
-    
     azienda_pulita = pulisci_nome_azienda(nome_azienda)
     
     payload = {
@@ -53,9 +52,32 @@ def check_hubspot_contact(dominio, nome_azienda):
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=15)
         if res.status_code == 200:
-            return res.json().get('total', 0) > 0
+            results = res.json().get('results', [])
+            if results:
+                return results[0].get('id')
     except: pass
-    return False
+    return None
+
+def check_hubspot_contact(dominio, nome_azienda):
+    return cerca_id_hubspot_contact(dominio, nome_azienda) is not None
+
+def aggiorna_hubspot_referente(contact_id, nome_dm, ruolo_dm, email_dm, email_generica):
+    if not hubspot_token or not contact_id: return
+    headers = {'Authorization': f'Bearer {hubspot_token}', 'Content-Type': 'application/json'}
+    
+    ruolo = ruolo_dm.upper() if ruolo_dm != "NESSUNO" else ""
+    properties = {
+        "referente": f"{nome_dm.upper()} {ruolo}".strip()
+    }
+    if email_dm and "@" in email_dm and email_dm != "nessuna":
+        properties["email"] = email_dm
+        if email_generica and "@" in email_generica and email_generica != "nessuna" and email_generica != email_dm:
+            properties["hs_additional_emails"] = email_generica
+            
+    try:
+        url_patch = f"https://api.hubapi.com/crm/v3/objects/contacts/{contact_id}"
+        requests.patch(url_patch, headers=headers, json={"properties": properties}, timeout=15)
+    except: pass
 
 def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_dm, email_dm, settore, telefono, citta, regione):
     if not hubspot_token: return "Token mancante"
@@ -161,7 +183,6 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
     azienda_pulita = pulisci_nome_azienda(nome_azienda)
     headers = {'X-API-KEY': serper_api_key, 'Content-Type': 'application/json'}
     
-    # Query snella (sotto il limite di 32 token di Google Search) per catturare tutti i profili rilevanti
     query = f'site:it.linkedin.com/in "{azienda_pulita}" (Commerciale OR Vendite OR Sales OR Direttore OR HR OR CEO OR Titolare OR Amministratore)'
     payload = json.dumps({"q": query, "gl": "it", "hl": "it"})
     
@@ -171,7 +192,6 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         
         risultati = res.json().get('organic', [])
         
-        # Fallback automatico: se la query con i ruoli non restituisce risultati, cerca tutti i profili dell'azienda
         if not risultati:
             payload_fb = json.dumps({"q": f'site:it.linkedin.com/in "{azienda_pulita}"', "gl": "it", "hl": "it"})
             res_fb = requests.post(url, headers=headers, data=payload_fb, timeout=15)
@@ -211,7 +231,6 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         {testo_risultati}
         """
         
-        # Pausa anti-Rate-Limit e retry automatico su Gemini
         time.sleep(5)
         for tentativo in range(2):
             try:
@@ -236,6 +255,50 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
     except Exception as e:
         return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
 
+# =======================================================
+# FUNZIONE DI INTEGRAZIONE AUTOMATICA CONTATTI SENZA REFERENTE
+# =======================================================
+def integra_referenti_mancanti(worksheet_assistente, dati_prospect):
+    print("Verifica ultimi contatti in 'Nuovi Prospect' con referente mancante...")
+    tot_righe = len(dati_prospect)
+    inizio_controllo = max(1, tot_righe - 50)  # Controlla le ultime 50 righe inserite
+    
+    for idx in range(inizio_controllo, tot_righe):
+        riga_p = dati_prospect[idx]
+        num_riga_sheet = idx + 1
+        
+        nome_az = riga_p[0].strip() if len(riga_p) > 0 else ""
+        url_az = riga_p[1].strip() if len(riga_p) > 1 else ""
+        email_az = riga_p[5].strip().lower() if len(riga_p) > 5 else ""
+        referente_att = riga_p[6].strip() if len(riga_p) > 6 else ""
+        
+        # Se manca il referente, esegue la ricerca mirata e integra Foglio + HubSpot
+        if nome_az and url_az and not referente_att:
+            dominio_az = urlparse(url_az).netloc.replace('www.', '').lower()
+            print(f"🔄 Integrazione referente mancante per riga {num_riga_sheet}: {nome_az} ({dominio_az})")
+            
+            nome_dm, ruolo_dm, email_dm = cerca_decision_maker_osint(nome_az, dominio_az, email_az)
+            
+            if nome_dm != "SCONOSCIUTO":
+                ref_completo = f"{nome_dm.upper()} {ruolo_dm.upper()}".strip()
+                email_ref_finale = email_dm if email_dm != "nessuna" else ""
+                
+                # Aggiorna colonne G e H in Nuovi Prospect
+                worksheet_assistente.update(values=[[ref_completo, email_ref_finale]], range_name=f"G{num_riga_sheet}:H{num_riga_sheet}")
+                
+                # Aggiorna anche la scheda contatto già presente in HubSpot
+                contact_id = cerca_id_hubspot_contact(dominio_az, nome_az)
+                if contact_id:
+                    aggiorna_hubspot_referente(contact_id, nome_dm, ruolo_dm, email_ref_finale, email_az)
+                    
+                print(f"✅ Integrato con successo: {ref_completo} | {email_ref_finale}")
+                time.sleep(2)
+            else:
+                # Segna "--" per non ricontrollarlo all'infinito nei lanci futuri
+                worksheet_assistente.update(values=[["--", "NESSUNA"]], range_name=f"G{num_riga_sheet}:H{num_riga_sheet}")
+                print(f"ℹ️ Nessun profilo LinkedIn pubblico trovato per {nome_az}.")
+                time.sleep(1.5)
+
 def main():
     URL_FOGLIO = "https://docs.google.com/spreadsheets/d/15K6_SNBTB-QBNwFB2L6Qjrd56wZ7clD3Tm9zM-MI7zc/edit?gid=0#gid=0" 
     try:
@@ -248,9 +311,10 @@ def main():
     dati_prospect = worksheet_assistente.get_all_values()
     data_odierna = datetime.now().strftime('%d/%m/%Y')
     
-    # =======================================================
-    # CARICAMENTO STORICO "NUOVI PROSPECT" ANTI-DOPPIONI
-    # =======================================================
+    # 1. INTEGRA SUBITO GLI ULTIMI CONTATTI SENZA REFERENTE (FOGLIO + HUBSPOT)
+    integra_referenti_mancanti(worksheet_assistente, dati_prospect)
+    
+    # 2. CARICAMENTO STORICO "NUOVI PROSPECT" ANTI-DOPPIONI
     aziende_gia_in_prospect = set()
     domini_gia_in_prospect = set()
     for r_p in dati_prospect[1:]:
@@ -261,6 +325,7 @@ def main():
             if dom_p:
                 domini_gia_in_prospect.add(dom_p)
     
+    # 3. ANALISI NUOVE RIGHE DA FOGLIO1
     for i in range(1, len(dati)):
         riga = dati[i]
         if len(riga) < 2: continue
@@ -272,7 +337,6 @@ def main():
             numero_riga = i + 1
             dominio = urlparse(url_sito).netloc.replace('www.', '').lower()
             
-            # CONTROLLO DOPPIONI 1 (Sul dominio prima dello scraping)
             if dominio in domini_gia_in_prospect:
                 print(f"Salto riga {numero_riga} ({dominio}): dominio già presente in Nuovi Prospect.")
                 worksheet_master.update(values=[["Già in Nuovi Prospect", "DUPLICATO", data_odierna]], range_name=f"C{numero_riga}:E{numero_riga}")
@@ -356,7 +420,6 @@ def main():
                 if "AGENTE" in esito:
                     nome_pulito = pulisci_nome_azienda(nome_reale)
                     
-                    # CONTROLLO DOPPIONI 2 (Sul nome azienda estratto e sul dominio)
                     if (nome_pulito and nome_pulito in aziende_gia_in_prospect) or (dominio in domini_gia_in_prospect):
                         print(f"Salto inserimento {nome_reale}: già presente in Nuovi Prospect.")
                         continue
@@ -384,8 +447,8 @@ def main():
                             settore, telefono_finale, citta_finale, regione_finale
                         )
                         
-                    referente_completo = f"{nome_dm.upper()} {ruolo_dm.upper()}".strip() if nome_dm != "SCONOSCIUTO" else ""
-                    email_referente_finale = email_dm if email_dm != "nessuna" else ""
+                    referente_completo = f"{nome_dm.upper()} {ruolo_dm.upper()}".strip() if nome_dm != "SCONOSCIUTO" else "--"
+                    email_referente_finale = email_dm if email_dm != "nessuna" else "NESSUNA"
                     email_azienda_finale = email if email != "nessuna" else ""
                     
                     nuova_riga = [
@@ -401,7 +464,6 @@ def main():
                     ]
                     worksheet_assistente.append_row(nuova_riga)
                     
-                    # Registra subito in memoria l'azienda appena aggiunta per bloccare doppioni nella stessa sessione
                     if nome_pulito:
                         aziende_gia_in_prospect.add(nome_pulito)
                     domini_gia_in_prospect.add(dominio)
