@@ -31,21 +31,24 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit(1)
 
+# Espressioni calibrate sul linguaggio delle PMI italiane (1-15M€)
 azioni = [
     '"ricerca agenti"', '"cerchiamo agenti"', '"selezioniamo agenti"', 
-    '"lavora con noi" agente', '"posizioni aperte" agente', 
+    '"cercasi agenti"', '"cerca agenti"', '"diventa nostro agente"',
+    '"sei un agente"', '"collabora con noi" agente', '"lavora con noi" agente', 
     '"ricerca procacciatori"', '"invia cv" agente', '"rete vendita" "lavora con noi"',
     '"opportunità per agenti"', '"ricerca rappresentanti"', '"agenti plurimandatari"',
-    '"agenti monomandatari"', '"ampliamento rete vendita"', '"cerca agenti"'
+    '"agenti monomandatari"', '"ampliamento rete vendita"', '"agenti di commercio"'
 ]
 
 settori = [
     "medicale", "software", "horeca", "edilizia", "industriale", "b2b",
-    "farmaceutico", "automazione", "logistica", "alimentare", "servizi alle imprese", 
+    "automazione", "logistica", "alimentare", "servizi alle imprese", 
     "arredamento", "impiantistica", "cosmesi", "meccanica", "agricoltura", 
     "ferramenta", "packaging", "plastica", "chimica", "utensileria", 
     "termoidraulica", "illuminazione", "serramenti", "antinfortunistica", 
-    "forniture industriali", "macchinari", "oleodinamica", "elettrotecnica"
+    "forniture industriali", "macchinari", "oleodinamica", "elettrotecnica",
+    "carpenteria", "stampaggio", "automazione industriale", "detergenza professionale"
 ]
 
 province = [
@@ -81,12 +84,15 @@ siti_da_escludere = [
     'teamtailor', 'oraclecloud', 'carusihr', 'confartigianato', 'confindustria',
     'cna.it', 'casa.it', 'immobiliare', 'tecnocasa', 'tempocasa', 'gabetti',
     'remax', 'toscano.it', 'engelvoelkers', 'paginebianche', 'paginegialle',
-    'verisure', 'venditoriadistanza', 'x.com', 'twitter.com', '.blog/'
+    'verisure', 'venditoriadistanza', 'x.com', 'twitter.com', '.blog/',
+    'commercialagents-italy', 'just.it', 'reddit.com', 'calameo.com', 'faciletrovare'
 ]
 
+# Esclude anche path tipici di multinazionali (/global/, /corporate/, /investors/, careers.)
 path_da_escludere = [
     '/sitemap', '/blog/', '/news/', '/category/', '/tag/', '/author/', 
-    '/articolo/', '/economia/', '/storia-', '/incontri'
+    '/articolo/', '/economia/', '/storia-', '/incontri', '/global/', 
+    '/corporate/', '/investors/', 'careers.', 'jobs.'
 ]
 
 def main():
@@ -104,19 +110,26 @@ def main():
     dati_da_inserire = []
     combinazioni_usate = set()
 
-    for _ in range(65):
+    for _ in range(55):
         azione = random.choice(azioni)
         settore = random.choice(settori)
         provincia = random.choice(province)
-        pagina = random.choice([1, 2])
+        # Pagine 1, 2, 3 e 4 per pescare le PMI italiane oltre i grandi gruppi della prima pagina
+        pagina = random.choice([1, 2, 3, 4])
         
-        chiave_combo = f"{azione}_{settore}_{provincia}_{pagina}"
+        # Nel 60% delle query forza la presenza di forme societarie da PMI (Srl, Snc, Sas)
+        filtro_pmi = ' (srl OR "s.r.l." OR snc OR sas)' if random.random() < 0.6 else ''
+        
+        chiave_combo = f"{azione}_{settore}_{provincia}_{pagina}_{filtro_pmi}"
         if chiave_combo in combinazioni_usate:
             continue
         combinazioni_usate.add(chiave_combo)
         
-        query = f'{azione} {settore} {provincia} -immobiliare -franchising -associazione -corsi'
-        print(f"Eseguo query mirata (Pag. {pagina}): {query}")
+        query = (
+            f'{azione} {settore} {provincia}{filtro_pmi} '
+            f'-immobiliare -franchising -associazione -corsi -multinazionale -global -holding'
+        )
+        print(f"Eseguo query PMI (Pag. {pagina}): {query}")
         
         url = "https://google.serper.dev/search"
         payload_dict = {
@@ -134,6 +147,12 @@ def main():
         
         try:
             response = requests.post(url, headers=headers, data=json.dumps(payload_dict), timeout=15)
+            
+            # Se i crediti Serper dovessero terminare, interrompe subito il ciclo senza fare 55 tentativi a vuoto
+            if response.status_code == 400 and "Not enough credits" in response.text:
+                print("⚠️ Crediti Serper esauriti. Interrompo la ricerca.")
+                break
+                
             if response.status_code == 400 and "page" in payload_dict:
                 del payload_dict["page"]
                 response = requests.post(url, headers=headers, data=json.dumps(payload_dict), timeout=15)
@@ -156,7 +175,7 @@ def main():
                     continue
                     
                 titolo_lower = titolo.lower()
-                if any(p in titolo_lower for p in ['immobiliare', 'incontri', 'cerco ragazza', 'trans ', 'concorso pubblico']):
+                if any(p in titolo_lower for p in ['immobiliare', 'incontri', 'cerco ragazza', 'trans ', 'concorso pubblico', 'multinazionale']):
                     continue
                     
                 if any(path_vietato in link for path_vietato in path_da_escludere):
@@ -184,9 +203,8 @@ def main():
 
     if dati_da_inserire:
         try:
-            # append_rows aggiunge righe automaticamente anche oltre il limite delle 1000 righe!
             worksheet.append_rows(dati_da_inserire, value_input_option='USER_ENTERED')
-            print(f"✅ Aggiunti con successo {len(dati_da_inserire)} prospect mandanti puliti!")
+            print(f"✅ Aggiunti con successo {len(dati_da_inserire)} prospect PMI puliti!")
         except Exception as e_sheet:
             print(f"⚠️ Errore durante il salvataggio su Google Sheet: {e_sheet}")
     else:
