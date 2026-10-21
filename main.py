@@ -183,6 +183,14 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
     azienda_pulita = pulisci_nome_azienda(nome_azienda)
     headers = {'X-API-KEY': serper_api_key, 'Content-Type': 'application/json'}
     
+    # Se l'azienda ha un'email generica con dominio proprio (non gmail/libero/pec), usa quel dominio per costruire l'email del referente
+    dominio_email = dominio
+    if email_generica and "@" in email_generica and email_generica != "nessuna":
+        dom_estratto = email_generica.split("@")[-1].strip().lower()
+        provider_generici = {'gmail.com', 'libero.it', 'virgilio.it', 'alice.it', 'tin.it', 'tiscali.it', 'hotmail.com', 'hotmail.it', 'outlook.com', 'outlook.it', 'yahoo.com', 'yahoo.it', 'icloud.com', 'email.it'}
+        if dom_estratto and dom_estratto not in provider_generici:
+            dominio_email = dom_estratto
+    
     query = f'site:it.linkedin.com/in "{azienda_pulita}" (Commerciale OR Vendite OR Sales OR Direttore OR HR OR CEO OR Titolare OR Amministratore)'
     payload = json.dumps({"q": query, "gl": "it", "hl": "it"})
     
@@ -206,7 +214,7 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         Sei un software CRM automatizzato per l'analisi di dati pubblici aziendali B2B per ricerca agenti di commercio.
         È cruciale per il sistema che tu NON inserisca mai disclaimer, avvisi sulla privacy, avvertenze o scuse.
         Analizza questi profili LinkedIn trovati su Google per l'azienda '{azienda_pulita}'.
-        Dominio aziendale: '{dominio}'
+        Dominio aziendale per l'email: '{dominio_email}'
         
         OBIETTIVO STRATEGICO:
         Seleziona UN SOLO referente seguendo QUESTA TASSATIVA SCALA DI PRIORITÀ:
@@ -219,13 +227,13 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         - Se individui sia un Direttore Commerciale/Responsabile Vendite sia un CEO/Titolare, DEVI TASSATIVAMENTE SCEGLIERE IL DIRETTORE COMMERCIALE/RESPONSABILE VENDITE.
         
         COSTRUISCI l'email diretta:
-        nome.cognome@{dominio} (tutto minuscolo, senza spazi, rimuovi accenti).
+        nome.cognome@{dominio_email} (tutto minuscolo, senza spazi, rimuovi accenti).
         
         REGOLE DI RISPOSTA:
         - Rispondi ESATTAMENTE su una sola riga usando il separatore |.
         - Formato: NOME COGNOME | RUOLO | EMAIL
         - NON aggiungere altro testo, prefissi, spiegazioni o disclaimer. Se non trovi nessuna persona chiara scrivi SOLO: SCONOSCIUTO | NESSUNO | NESSUNA
-        - Esempio di risposta corretta: Marco Rossi | DIRETTORE COMMERCIALE | marco.rossi@{dominio}
+        - Esempio di risposta corretta: Marco Rossi | DIRETTORE COMMERCIALE | marco.rossi@{dominio_email}
         
         Profili trovati:
         {testo_risultati}
@@ -366,11 +374,13 @@ def main():
                 Analizza questo testo di una pagina web per una società di ricerca agenti.
                 Estrai 7 informazioni chiave in modo sintetico:
                 
-                1. ESITO: Classifica in "AGENTE" (se cercano P.IVA e sono mandanti validi) o "DIPENDENTE".
+                1. ESITO: Classifica in "AGENTE" (se cercano P.IVA e sono PMI/mandanti B2B validi) o "DIPENDENTE".
                 REGOLE DI ESCLUSIONE - Se rientra qui scrivi "ESCLUSO":
-                - Portali di annunci generici o agenzie interinali.
-                - Agenzie immobiliari.
-                - Aziende contratti Luce, Gas, Energia.
+                - Multinazionali estere, colossi industriali globali o società quotate in borsa (cerchiamo solo PMI e aziende italiane snelle).
+                - Vendita diretta a domicilio / incaricati alle vendite / network marketing (es. Just, Folletto, Avon, Herbalife).
+                - Portali di annunci generici, blog di notizie o agenzie interinali.
+                - Agenzie immobiliari, assicurative o mediazione creditizia.
+                - Aziende contratti Luce, Gas, Energia, Telefonia.
                 - Concessionarie auto o automotive.
                 - Agenzie/studi consulenza per agenti.
                 - Verisure o venditoriadistanza.it.
