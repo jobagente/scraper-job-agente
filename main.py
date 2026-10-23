@@ -37,6 +37,13 @@ def pulisci_nome_azienda(nome):
     if not nome: return ""
     return re.sub(r'(?i)\b(s\.r\.l\.|srl|s\.p\.a\.|spa|s\.n\.c\.|snc|s\.a\.s\.|sas|s\.r\.l\.s\.|srls|unipersonale)\b', '', nome).strip().upper()
 
+def estrai_dominio(testo_url):
+    if not testo_url: return ""
+    t = testo_url.strip().lower()
+    if "://" in t:
+        return urlparse(t).netloc.replace('www.', '')
+    return t.split('/')[0].replace('www.', '')
+
 def cerca_id_hubspot_contact(dominio, nome_azienda):
     if not hubspot_token: return None
     url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
@@ -183,7 +190,6 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
     azienda_pulita = pulisci_nome_azienda(nome_azienda)
     headers = {'X-API-KEY': serper_api_key, 'Content-Type': 'application/json'}
     
-    # Se l'azienda ha un'email generica con dominio proprio (non gmail/libero/pec), usa quel dominio per costruire l'email del referente
     dominio_email = dominio
     if email_generica and "@" in email_generica and email_generica != "nessuna":
         dom_estratto = email_generica.split("@")[-1].strip().lower()
@@ -264,12 +270,36 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
 
 # =======================================================
+# BONIFICA ANTI-PHISHING GOOGLE DRIVE (DISINNESCO URL SCARTATI)
+# =======================================================
+def bonifica_link_scartati(worksheet_master, dati):
+    modifiche_col_b = []
+    conteggio_bonificati = 0
+    for i in range(1, len(dati)):
+        riga = dati[i]
+        url_val = riga[1].strip() if len(riga) > 1 else ""
+        esito_val = riga[3].strip().upper() if len(riga) > 3 else ""
+        
+        # Se la riga è già stata processata e NON è AGENTE, rimuove https:// lasciando solo il dominio
+        if esito_val and "AGENTE" not in esito_val and "://" in url_val:
+            dom_pulito = estrai_dominio(url_val)
+            modifiche_col_b.append([dom_pulito])
+            conteggio_bonificati += 1
+        else:
+            modifiche_col_b.append([url_val])
+            
+    if conteggio_bonificati > 0:
+        print(f"🛡️ Bonifica anti-phishing: disinnesco {conteggio_bonificati} URL scartati in Foglio1...")
+        worksheet_master.update(values=modifiche_col_b, range_name=f"B2:B{len(dati)}")
+        time.sleep(2)
+
+# =======================================================
 # FUNZIONE DI INTEGRAZIONE AUTOMATICA CONTATTI SENZA REFERENTE (ULTIMI 20)
 # =======================================================
 def integra_referenti_mancanti(worksheet_assistente, dati_prospect):
     print("Verifica ultimi 20 contatti in 'Nuovi Prospect' con referente mancante...")
     tot_righe = len(dati_prospect)
-    inizio_controllo = max(1, tot_righe - 20)  # Controlla solo le ultime 20 righe inserite
+    inizio_controllo = max(1, tot_righe - 20)
     
     for idx in range(inizio_controllo, tot_righe):
         riga_p = dati_prospect[idx]
@@ -281,7 +311,7 @@ def integra_referenti_mancanti(worksheet_assistente, dati_prospect):
         referente_att = riga_p[6].strip() if len(riga_p) > 6 else ""
         
         if nome_az and url_az and not referente_att:
-            dominio_az = urlparse(url_az).netloc.replace('www.', '').lower()
+            dominio_az = estrai_dominio(url_az)
             print(f"🔄 Integrazione referente mancante per riga {num_riga_sheet}: {nome_az} ({dominio_az})")
             
             nome_dm, ruolo_dm, email_dm = cerca_decision_maker_osint(nome_az, dominio_az, email_az)
@@ -315,6 +345,9 @@ def main():
     dati_prospect = worksheet_assistente.get_all_values()
     data_odierna = datetime.now().strftime('%d/%m/%Y')
     
+    # 0. BONIFICA AUTOMATICA DEI LINK SCARTATI (ANTI-AVVISO PHISHING GOOGLE DRIVE)
+    bonifica_link_scartati(worksheet_master, dati)
+    
     # 1. INTEGRA GLI ULTIMI 20 CONTATTI SENZA REFERENTE (FOGLIO + HUBSPOT)
     integra_referenti_mancanti(worksheet_assistente, dati_prospect)
     
@@ -325,7 +358,7 @@ def main():
         if len(r_p) > 0 and r_p[0].strip():
             aziende_gia_in_prospect.add(pulisci_nome_azienda(r_p[0]))
         if len(r_p) > 1 and r_p[1].strip():
-            dom_p = urlparse(r_p[1].strip()).netloc.replace('www.', '').lower()
+            dom_p = estrai_dominio(r_p[1])
             if dom_p:
                 domini_gia_in_prospect.add(dom_p)
     
@@ -339,11 +372,11 @@ def main():
 
         if url_sito and not esito_attuale:
             numero_riga = i + 1
-            dominio = urlparse(url_sito).netloc.replace('www.', '').lower()
+            dominio = estrai_dominio(url_sito)
             
             if dominio in domini_gia_in_prospect:
                 print(f"Salto riga {numero_riga} ({dominio}): dominio già presente in Nuovi Prospect.")
-                worksheet_master.update(values=[["Già in Nuovi Prospect", "DUPLICATO", data_odierna]], range_name=f"C{numero_riga}:E{numero_riga}")
+                worksheet_master.update(values=[[dominio, "Già in Nuovi Prospect", "DUPLICATO", data_odierna]], range_name=f"B{numero_riga}:E{numero_riga}")
                 time.sleep(1.5)
                 continue
 
@@ -420,7 +453,11 @@ def main():
                         if t < max_tentativi - 1: time.sleep(30)
                         else: raise e_ia
                 
-                worksheet_master.update(values=[[titolo, esito, data_odierna]], range_name=f"C{numero_riga}:E{numero_riga}")
+                # Se NON è AGENTE, salva solo il dominio testuale (senza https://) nella colonna B
+                if "AGENTE" not in esito:
+                    worksheet_master.update(values=[[dominio, titolo, esito, data_odierna]], range_name=f"B{numero_riga}:E{numero_riga}")
+                else:
+                    worksheet_master.update(values=[[titolo, esito, data_odierna]], range_name=f"C{numero_riga}:E{numero_riga}")
                 time.sleep(1.5) 
                 
                 if "AGENTE" in esito:
@@ -475,7 +512,7 @@ def main():
                     domini_gia_in_prospect.add(dominio)
                 
             except Exception as e:
-                worksheet_master.update(values=[["ERRORE", data_odierna]], range_name=f"D{numero_riga}:E{numero_riga}")
+                worksheet_master.update(values=[[dominio, "Sito non raggiungibile", "ERRORE", data_odierna]], range_name=f"B{numero_riga}:E{numero_riga}")
                 time.sleep(1.5)
 
 if __name__ == "__main__":
