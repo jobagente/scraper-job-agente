@@ -31,7 +31,6 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit(1)
 
-# Espressioni calibrate sul linguaggio delle PMI italiane (1-15M€)
 azioni = [
     '"ricerca agenti"', '"cerchiamo agenti"', '"selezioniamo agenti"', 
     '"cercasi agenti"', '"cerca agenti"', '"diventa nostro agente"',
@@ -88,22 +87,28 @@ siti_da_escludere = [
     'commercialagents-italy', 'just.it', 'reddit.com', 'calameo.com', 'faciletrovare'
 ]
 
-# Esclude anche path tipici di multinazionali (/global/, /corporate/, /investors/, careers.)
 path_da_escludere = [
     '/sitemap', '/blog/', '/news/', '/category/', '/tag/', '/author/', 
     '/articolo/', '/economia/', '/storia-', '/incontri', '/global/', 
     '/corporate/', '/investors/', 'careers.', 'jobs.'
 ]
 
+def estrai_dominio(testo_url):
+    if not testo_url: return ""
+    t = testo_url.strip().lower()
+    if "://" in t:
+        return urlparse(t).netloc.replace('www.', '')
+    return t.split('/')[0].replace('www.', '')
+
 def main():
     colonna_b_master = worksheet.col_values(2)
     colonna_b_prospect = worksheet_prospect.col_values(2)
     
-    # CONTROLLO ANTI-DOPPIONI: legge i domini sia da Foglio1 sia da Nuovi Prospect
+    # Legge sia i link completi (https://...) sia i domini già bonificati (nomeazienda.it)
     domini_inseriti = set()
     for link in colonna_b_master[1:] + colonna_b_prospect[1:]:
         if link:
-            dominio = urlparse(link.strip()).netloc.replace('www.', '').lower()
+            dominio = estrai_dominio(link)
             if dominio:
                 domini_inseriti.add(dominio)
             
@@ -114,10 +119,8 @@ def main():
         azione = random.choice(azioni)
         settore = random.choice(settori)
         provincia = random.choice(province)
-        # Pagine 1, 2, 3 e 4 per pescare le PMI italiane oltre i grandi gruppi della prima pagina
         pagina = random.choice([1, 2, 3, 4])
         
-        # Nel 60% delle query forza la presenza di forme societarie da PMI (Srl, Snc, Sas)
         filtro_pmi = ' (srl OR "s.r.l." OR snc OR sas)' if random.random() < 0.6 else ''
         
         chiave_combo = f"{azione}_{settore}_{provincia}_{pagina}_{filtro_pmi}"
@@ -148,7 +151,6 @@ def main():
         try:
             response = requests.post(url, headers=headers, data=json.dumps(payload_dict), timeout=15)
             
-            # Se i crediti Serper dovessero terminare, interrompe subito il ciclo senza fare 55 tentativi a vuoto
             if response.status_code == 400 and "Not enough credits" in response.text:
                 print("⚠️ Crediti Serper esauriti. Interrompo la ricerca.")
                 break
@@ -181,7 +183,7 @@ def main():
                 if any(path_vietato in link for path_vietato in path_da_escludere):
                     continue
                     
-                dominio_estratto = urlparse(link).netloc.replace('www.', '').lower()
+                dominio_estratto = estrai_dominio(link)
                 
                 if not any(sito_vietato in link for sito_vietato in siti_da_escludere):
                     if dominio_estratto and dominio_estratto not in domini_inseriti:
