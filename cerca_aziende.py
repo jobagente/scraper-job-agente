@@ -31,22 +31,25 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit(1)
 
-# Tutte le query forzano la presenza di una pagina di selezione/ricerca agenti
+# Query mirate su vere pagine "Lavora con noi" e annunci diretti di ricerca agenti
 azioni = [
-    '"lavora con noi" "agenti"',
-    '"lavora con noi" "agente di commercio"',
-    '"cerchiamo agenti"',
-    '"ricerca agenti"',
-    '"cercasi agenti"',
-    '"selezioniamo agenti"',
+    'inurl:lavora-con-noi "agenti"',
+    'inurl:lavora-con-noi "agente"',
+    'inurl:lavoraconnoi "agenti"',
+    'intitle:"lavora con noi" "agenti"',
+    'intitle:"lavora con noi" "agente di commercio"',
+    '"lavora con noi" "cerchiamo agenti"',
+    '"lavora con noi" "ricerca agenti"',
+    '"lavora con noi" "agenti plurimandatari"',
+    '"lavora con noi" "agenti monomandatari"',
+    '"cerchiamo agenti" "invia"',
+    '"cercasi agenti" "curriculum"',
+    '"selezioniamo agenti" "lavora con noi"',
     '"diventa nostro agente"',
-    '"collabora con noi" "agenti"',
-    '"invia cv" "agente"',
-    '"ampliamento rete vendita" "agenti"',
-    '"agenti plurimandatari" "lavora con noi"',
-    '"agenti monomandatari" "lavora con noi"',
-    '"ricerca rappresentanti"',
-    '"ricerca procacciatori"'
+    '"collabora con noi" "agenti di commercio"',
+    '"ampliamento rete vendita" "lavora con noi"',
+    '"ricerca rappresentanti" "lavora con noi"',
+    '"ricerca procacciatori" "lavora con noi"'
 ]
 
 settori = [
@@ -56,14 +59,15 @@ settori = [
     "ferramenta", "packaging", "plastica", "chimica", "utensileria", 
     "termoidraulica", "illuminazione", "serramenti", "antinfortunistica", 
     "forniture industriali", "macchinari", "oleodinamica", "elettrotecnica",
-    "carpenteria", "stampaggio", "automazione industriale", "detergenza"
+    "carpenteria", "stampaggio", "automazione industriale", "detergenza",
+    "estetica professionale", "ricambi", "componentistica", "bevande", "vini"
 ]
 
 province = [
     "Milano", "Brescia", "Verona", "Torino", "Bologna", "Roma", "Padova", "Vicenza", 
     "Treviso", "Bergamo", "Firenze", "Napoli", "Varese", "Monza", "Como", "Modena", 
     "Parma", "Reggio Emilia", "Cuneo", "Udine", "Pordenone", "Lecco", "Novara",
-    "Mantova", "Cremona", "Piacenza", "Rimini", "Ancona", "Bari", "Italia"
+    "Mantova", "Cremona", "Piacenza", "Rimini", "Ancona", "Bari", "Lombardia", "Veneto", "Emilia", "Piemonte"
 ]
 
 siti_da_escludere = [
@@ -95,16 +99,15 @@ siti_da_escludere = [
     'verisure', 'venditoriadistanza', 'x.com', 'twitter.com', '.blog/',
     'commercialagents-italy', 'just.it', 'reddit.com', 'calameo.com', 'faciletrovare',
     'atoka.io', 'empresite', 'pornhub', 'xhamster', 'bokep', 'porndig', 'assinews',
-    'realemutua', 'groupama', 'unipol', 'allianz', 'generali'
+    'realemutua', 'groupama', 'unipol', 'allianz', 'generali', 'grandiscuole.it', 'cepulavoro'
 ]
 
-# Esclude pagine di catalogo prodotti, case study, news o ricerca rivenditori per clienti finali
 path_da_escludere = [
     '/sitemap', '/blog/', '/news/', '/category/', '/tag/', '/author/', 
     '/articolo/', '/economia/', '/storia-', '/incontri', '/global/', 
     '/corporate/', '/investors/', 'careers.', 'jobs.', '/prodotti/', 
     '/product/', '/portfolio/', '/case-study/', '/caso-studio/', 
-    '/punti-vendita', '/trova-rivendit', '/account/'
+    '/punti-vendita', '/trova-rivendit', '/account/', '/magazine/'
 ]
 
 def estrai_dominio(testo_url):
@@ -115,15 +118,12 @@ def estrai_dominio(testo_url):
     return t.split('/')[0].replace('www.', '')
 
 def ha_segnali_reali_ricerca_agenti(titolo, snippet, link):
-    """Verifica che il risultato di Google contenga davvero un annuncio/ricerca di agenti o lavora con noi."""
     testo_completo = f"{titolo} {snippet} {link}".lower()
     
-    # 1. Deve esserci un riferimento alla figura commerciale/agente
     parole_target = ['agent', 'rappresentant', 'procacciat', 'vendit', 'commercial', 'plurimandat', 'monomandat', 'enasarco']
     if not any(pt in testo_completo for pt in parole_target):
         return False
         
-    # 2. Deve esserci un segnale di selezione/candidatura aperta (nella URL, nel titolo o nello snippet)
     segnali_selezione = [
         'lavora con noi', 'lavora-con-noi', 'lavoraconnoi', 'carriere', 'careers',
         'cerchiamo', 'cercasi', 'ricerca agent', 'ricerca rappresentant', 'ricerca procacciat',
@@ -151,11 +151,10 @@ def main():
     dati_da_inserire = []
     combinazioni_usate = set()
 
-    for _ in range(55):
+    for _ in range(75):
         azione = random.choice(azioni)
         settore = random.choice(settori)
         provincia = random.choice(province)
-        # Pagine 1 e 2 per evitare che Google ignori le virgolette su pagine troppo profonde
         pagina = random.choice([1, 2])
         
         chiave_combo = f"{azione}_{settore}_{provincia}_{pagina}"
@@ -197,7 +196,7 @@ def main():
             risultati = data.get('organic', [])
             if not risultati:
                 print("Nessun risultato utile.")
-                time.sleep(2)
+                time.sleep(1.5)
                 continue
             
             for item in risultati:
@@ -216,7 +215,6 @@ def main():
                 if any(path_vietato in link for path_vietato in path_da_escludere):
                     continue
                 
-                # CONTROLLO DI PERTINENZA: Salva il link solo se parla davvero di ricerca/selezione agenti o Lavora con noi
                 if not ha_segnali_reali_ricerca_agenti(titolo, snippet, link):
                     continue
                     
@@ -238,7 +236,7 @@ def main():
         if len(dati_da_inserire) >= 100:
             break
             
-        time.sleep(2)
+        time.sleep(1.5)
 
     if dati_da_inserire:
         try:
