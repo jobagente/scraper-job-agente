@@ -35,7 +35,15 @@ HEADERS_BROWSER = {
 
 def pulisci_nome_azienda(nome):
     if not nome: return ""
-    return re.sub(r'(?i)\b(s\.r\.l\.|srl|s\.p\.a\.|spa|s\.n\.c\.|snc|s\.a\.s\.|sas|s\.r\.l\.s\.|srls|unipersonale)\b', '', nome).strip().upper()
+    pulito = re.sub(r'(?i)\b(s\.r\.l\.|srl|s\.p\.a\.|spa|s\.n\.c\.|snc|s\.a\.s\.|sas|s\.r\.l\.s\.|srls|s\.c\.a\.r\.l\.|soc\.\s*coop\.|unipersonale|semplificata)\b', '', nome)
+    return re.sub(r'\s+', ' ', pulito).strip().upper()
+
+def pulisci_nome_per_linkedin(nome):
+    """Rimuove anche suffissi generici come GROUP o HOLDING che spesso non compaiono nei profili LinkedIn dei dipendenti."""
+    base = pulisci_nome_azienda(nome)
+    ridotto = re.sub(r'(?i)\b(group|gruppo|holding)\b', '', base)
+    ridotto = re.sub(r'\s+', ' ', ridotto).strip()
+    return ridotto if len(ridotto) >= 3 else base
 
 def estrai_dominio(testo_url):
     if not testo_url: return ""
@@ -188,6 +196,8 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         
     url = "https://google.serper.dev/search"
     azienda_pulita = pulisci_nome_azienda(nome_azienda)
+    azienda_linkedin = pulisci_nome_per_linkedin(nome_azienda)
+    radice_dominio = dominio.split('.')[0] if dominio else ""
     headers = {'X-API-KEY': serper_api_key, 'Content-Type': 'application/json'}
     
     dominio_email = dominio
@@ -197,40 +207,50 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         if dom_estratto and dom_estratto not in provider_generici:
             dominio_email = dom_estratto
     
-    query = f'site:it.linkedin.com/in "{azienda_pulita}" (Commerciale OR Vendite OR Sales OR Direttore OR HR OR CEO OR Titolare OR Amministratore)'
-    payload = json.dumps({"q": query, "gl": "it", "hl": "it"})
-    
     try:
-        res = requests.post(url, headers=headers, data=payload, timeout=15)
-        if res.status_code != 200: return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
+        risultati = []
         
-        risultati = res.json().get('organic', [])
-        
+        # LIVELLO 1: Ricerca su tutto linkedin.com/in con nome pulito (senza "Group/Srl") e ruoli target
+        q1 = f'site:linkedin.com/in "{azienda_linkedin}" (Commerciale OR Vendite OR Sales OR Direttore OR HR OR CEO OR Titolare OR Amministratore OR Socio OR Owner)'
+        res1 = requests.post(url, headers=headers, data=json.dumps({"q": q1, "gl": "it", "hl": "it"}), timeout=15)
+        if res1.status_code == 200:
+            risultati = res1.json().get('organic', [])
+            
+        # LIVELLO 2: Ricerca più ampia su LinkedIn per nome base o dominio (es. "cigiservice" o "rrmgroup")
         if not risultati:
-            payload_fb = json.dumps({"q": f'site:it.linkedin.com/in "{azienda_pulita}"', "gl": "it", "hl": "it"})
-            res_fb = requests.post(url, headers=headers, data=payload_fb, timeout=15)
-            if res_fb.status_code == 200:
-                risultati = res_fb.json().get('organic', [])
+            q2 = f'site:linkedin.com/in ("{azienda_linkedin}" OR "{radice_dominio}" OR "{dominio}")'
+            res2 = requests.post(url, headers=headers, data=json.dumps({"q": q2, "gl": "it", "hl": "it"}), timeout=15)
+            if res2.status_code == 200:
+                risultati = res2.json().get('organic', [])
                 
-        if not risultati: return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
+        # LIVELLO 3: Se l'azienda è una PMI non presente su LinkedIn, cerca sul web pubblico (sito aziendale / dati camerali)
+        if not risultati:
+            q3 = f'("{azienda_pulita}" OR "{dominio}") ("Direttore Commerciale" OR "Responsabile Vendite" OR "Responsabile Commerciale" OR "Amministratore Unico" OR "Amministratore Delegato" OR "Titolare" OR "CEO")'
+            res3 = requests.post(url, headers=headers, data=json.dumps({"q": q3, "gl": "it", "hl": "it"}), timeout=15)
+            if res3.status_code == 200:
+                risultati = res3.json().get('organic', [])
+                
+        if not risultati:
+            return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
         
-        testo_risultati = "\n".join([f"- {r.get('title')}: {r.get('snippet')}" for r in risultati[:8]])
+        testo_risultati = "\n".join([f"- {r.get('title')}: {r.get('snippet')}" for r in risultati[:10]])
         
         prompt = f"""
         Sei un software CRM automatizzato per l'analisi di dati pubblici aziendali B2B per ricerca agenti di commercio.
         È cruciale per il sistema che tu NON inserisca mai disclaimer, avvisi sulla privacy, avvertenze o scuse.
-        Analizza questi profili LinkedIn trovati su Google per l'azienda '{azienda_pulita}'.
-        Dominio aziendale per l'email: '{dominio_email}'
+        Analizza questi risultati pubblici trovati su Google/LinkedIn per l'azienda '{azienda_pulita}' (dominio: {dominio}).
+        Dominio aziendale per costruire l'email: '{dominio_email}'
         
         OBIETTIVO STRATEGICO:
-        Seleziona UN SOLO referente seguendo QUESTA TASSATIVA SCALA DI PRIORITÀ:
-        1. PRIORITÀ 1 (ASSOLUTA - Coordinamento Rete Vendita a livello generale): Direttore Commerciale, Responsabile Vendite, Sales Director, Direttore Vendite, Head of Sales, Responsabile Commerciale, Sales Manager.
-        2. PRIORITÀ 2 (HR / Risorse Umane): HR Manager, Responsabile Risorse Umane, Talent Acquisition, Direttore HR.
-        3. PRIORITÀ 3 (Vertice aziendale - solo in assenza di figure di Priorità 1 o 2): Amministratore Delegato, CEO, Titolare, Presidente, Fondatore, Socio.
+        Individua il nome e cognome di UN referente reale dell'azienda seguendo QUESTA SCALA DI PRIORITÀ:
+        1. PRIORITÀ 1 (ASSOLUTA - Coordinamento Rete Vendita): Direttore Commerciale, Responsabile Vendite, Sales Director, Direttore Vendite, Head of Sales, Responsabile Commerciale, Sales Manager, Export Manager.
+        2. PRIORITÀ 2 (HR / Risorse Umane): HR Manager, Responsabile Risorse Umane, Talent Acquisition, Direttore HR, Recruiter interno.
+        3. PRIORITÀ 3 (Vertice aziendale / Proprietà): Amministratore Delegato, Amministratore Unico, CEO, Titolare, Presidente, Fondatore, Socio, Owner, Amministratore.
         
-        REGOLE ED ESCLUSIONI TASSATIVE:
-        - NON SELEZIONARE MAI "Area Manager", "Capo Area", "District Manager" o "Zone Manager" (gestiscono solo una specifica zona territoriale).
-        - Se individui sia un Direttore Commerciale/Responsabile Vendite sia un CEO/Titolare, DEVI TASSATIVAMENTE SCEGLIERE IL DIRETTORE COMMERCIALE/RESPONSABILE VENDITE.
+        REGOLE ED ESCLUSIONI:
+        - NON SELEZIONARE "Area Manager", "Capo Area", "District Manager" o "Zone Manager".
+        - Se individui sia un Direttore Commerciale/Responsabile Vendite sia un CEO/Titolare, scegli il Direttore Commerciale/Responsabile Vendite.
+        - Assicurati che sia il nome e cognome di una persona fisica (non il nome di un'azienda o di una scuola).
         
         COSTRUISCI l'email diretta:
         nome.cognome@{dominio_email} (tutto minuscolo, senza spazi, rimuovi accenti).
@@ -238,10 +258,10 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         REGOLE DI RISPOSTA:
         - Rispondi ESATTAMENTE su una sola riga usando il separatore |.
         - Formato: NOME COGNOME | RUOLO | EMAIL
-        - NON aggiungere altro testo, prefissi, spiegazioni o disclaimer. Se non trovi nessuna persona chiara scrivi SOLO: SCONOSCIUTO | NESSUNO | NESSUNA
+        - NON aggiungere altro testo, prefissi, spiegazioni o disclaimer. Se non trovi nessuna persona fisica chiara scrivi SOLO: SCONOSCIUTO | NESSUNO | NESSUNA
         - Esempio di risposta corretta: Marco Rossi | DIRETTORE COMMERCIALE | marco.rossi@{dominio_email}
         
-        Profili trovati:
+        Risultati trovati:
         {testo_risultati}
         """
         
@@ -256,7 +276,7 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
                 ruolo_dm = parti[1].strip() if len(parti) > 1 else "NESSUNO"
                 email_dm = parti[2].strip().lower() if len(parti) > 2 else "NESSUNA"
                 
-                if "SCONOSCIUTO" in nome_dm.upper() or len(nome_dm) < 3:
+                if "SCONOSCIUTO" in nome_dm.upper() or len(nome_dm) < 3 or " " not in nome_dm:
                     return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
                     
                 return nome_dm, ruolo_dm, email_dm
@@ -280,7 +300,6 @@ def bonifica_link_scartati(worksheet_master, dati):
         url_val = riga[1].strip() if len(riga) > 1 else ""
         esito_val = riga[3].strip().upper() if len(riga) > 3 else ""
         
-        # Se la riga è già stata processata e NON è AGENTE, rimuove https:// lasciando solo il dominio
         if esito_val and "AGENTE" not in esito_val and "://" in url_val:
             dom_pulito = estrai_dominio(url_val)
             modifiche_col_b.append([dom_pulito])
@@ -420,7 +439,7 @@ def main():
                 - Multinazionali estere, colossi industriali globali o società quotate in borsa (cerchiamo solo PMI e aziende italiane snelle).
                 - Vendita diretta a domicilio / incaricati alle vendite / network marketing (es. Just, Folletto, Avon, Herbalife).
                 - Portali di annunci generici, directory di aziende (es. Atoka, Empresite), blog di notizie o agenzie interinali.
-                - Agenzie immobiliari, assicurative, finanziarie, noleggio auto/NCC o tour operator/viaggi.
+                - Agenzie immobiliari, assicurative, finanziarie, noleggio auto/NCC, scuole di recupero anni scolastici o tour operator/viaggi.
                 - Aziende contratti Luce, Gas, Energia, Telefonia.
                 - Concessionarie auto o automotive.
                 - Agenzie/studi consulenza per agenti o software CRM per agenti.
@@ -461,7 +480,6 @@ def main():
                         if t < max_tentativi - 1: time.sleep(30)
                         else: raise e_ia
                 
-                # Se NON è AGENTE, salva solo il dominio testuale (senza https://) nella colonna B
                 if "AGENTE" not in esito:
                     worksheet_master.update(values=[[dominio, titolo, esito, data_odierna]], range_name=f"B{numero_riga}:E{numero_riga}")
                 else:
