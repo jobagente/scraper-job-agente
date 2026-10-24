@@ -99,7 +99,8 @@ siti_da_escludere = [
     'verisure', 'venditoriadistanza', 'x.com', 'twitter.com', '.blog/',
     'commercialagents-italy', 'just.it', 'reddit.com', 'calameo.com', 'faciletrovare',
     'atoka.io', 'empresite', 'pornhub', 'xhamster', 'bokep', 'porndig', 'assinews',
-    'realemutua', 'groupama', 'unipol', 'allianz', 'generali', 'grandiscuole.it', 'cepulavoro'
+    'realemutua', 'groupama', 'unipol', 'allianz', 'generali', 'grandiscuole.it', 
+    'cepulavoro', 'issuu.com', 'archive.org', 'gowork.it', 'casagenti.it', 'vorwerk.com'
 ]
 
 path_da_escludere = [
