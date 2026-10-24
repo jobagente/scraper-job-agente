@@ -31,13 +31,22 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit(1)
 
+# Tutte le query forzano la presenza di una pagina di selezione/ricerca agenti
 azioni = [
-    '"ricerca agenti"', '"cerchiamo agenti"', '"selezioniamo agenti"', 
-    '"cercasi agenti"', '"cerca agenti"', '"diventa nostro agente"',
-    '"sei un agente"', '"collabora con noi" agente', '"lavora con noi" agente', 
-    '"ricerca procacciatori"', '"invia cv" agente', '"rete vendita" "lavora con noi"',
-    '"opportunità per agenti"', '"ricerca rappresentanti"', '"agenti plurimandatari"',
-    '"agenti monomandatari"', '"ampliamento rete vendita"', '"agenti di commercio"'
+    '"lavora con noi" "agenti"',
+    '"lavora con noi" "agente di commercio"',
+    '"cerchiamo agenti"',
+    '"ricerca agenti"',
+    '"cercasi agenti"',
+    '"selezioniamo agenti"',
+    '"diventa nostro agente"',
+    '"collabora con noi" "agenti"',
+    '"invia cv" "agente"',
+    '"ampliamento rete vendita" "agenti"',
+    '"agenti plurimandatari" "lavora con noi"',
+    '"agenti monomandatari" "lavora con noi"',
+    '"ricerca rappresentanti"',
+    '"ricerca procacciatori"'
 ]
 
 settori = [
@@ -47,14 +56,14 @@ settori = [
     "ferramenta", "packaging", "plastica", "chimica", "utensileria", 
     "termoidraulica", "illuminazione", "serramenti", "antinfortunistica", 
     "forniture industriali", "macchinari", "oleodinamica", "elettrotecnica",
-    "carpenteria", "stampaggio", "automazione industriale", "detergenza professionale"
+    "carpenteria", "stampaggio", "automazione industriale", "detergenza"
 ]
 
 province = [
     "Milano", "Brescia", "Verona", "Torino", "Bologna", "Roma", "Padova", "Vicenza", 
     "Treviso", "Bergamo", "Firenze", "Napoli", "Varese", "Monza", "Como", "Modena", 
     "Parma", "Reggio Emilia", "Cuneo", "Udine", "Pordenone", "Lecco", "Novara",
-    "Mantova", "Cremona", "Piacenza", "Rimini", "Ancona", "Bari", "Busto Arsizio"
+    "Mantova", "Cremona", "Piacenza", "Rimini", "Ancona", "Bari", "Italia"
 ]
 
 siti_da_escludere = [
@@ -84,13 +93,18 @@ siti_da_escludere = [
     'cna.it', 'casa.it', 'immobiliare', 'tecnocasa', 'tempocasa', 'gabetti',
     'remax', 'toscano.it', 'engelvoelkers', 'paginebianche', 'paginegialle',
     'verisure', 'venditoriadistanza', 'x.com', 'twitter.com', '.blog/',
-    'commercialagents-italy', 'just.it', 'reddit.com', 'calameo.com', 'faciletrovare'
+    'commercialagents-italy', 'just.it', 'reddit.com', 'calameo.com', 'faciletrovare',
+    'atoka.io', 'empresite', 'pornhub', 'xhamster', 'bokep', 'porndig', 'assinews',
+    'realemutua', 'groupama', 'unipol', 'allianz', 'generali'
 ]
 
+# Esclude pagine di catalogo prodotti, case study, news o ricerca rivenditori per clienti finali
 path_da_escludere = [
     '/sitemap', '/blog/', '/news/', '/category/', '/tag/', '/author/', 
     '/articolo/', '/economia/', '/storia-', '/incontri', '/global/', 
-    '/corporate/', '/investors/', 'careers.', 'jobs.'
+    '/corporate/', '/investors/', 'careers.', 'jobs.', '/prodotti/', 
+    '/product/', '/portfolio/', '/case-study/', '/caso-studio/', 
+    '/punti-vendita', '/trova-rivendit', '/account/'
 ]
 
 def estrai_dominio(testo_url):
@@ -100,11 +114,33 @@ def estrai_dominio(testo_url):
         return urlparse(t).netloc.replace('www.', '')
     return t.split('/')[0].replace('www.', '')
 
+def ha_segnali_reali_ricerca_agenti(titolo, snippet, link):
+    """Verifica che il risultato di Google contenga davvero un annuncio/ricerca di agenti o lavora con noi."""
+    testo_completo = f"{titolo} {snippet} {link}".lower()
+    
+    # 1. Deve esserci un riferimento alla figura commerciale/agente
+    parole_target = ['agent', 'rappresentant', 'procacciat', 'vendit', 'commercial', 'plurimandat', 'monomandat', 'enasarco']
+    if not any(pt in testo_completo for pt in parole_target):
+        return False
+        
+    # 2. Deve esserci un segnale di selezione/candidatura aperta (nella URL, nel titolo o nello snippet)
+    segnali_selezione = [
+        'lavora con noi', 'lavora-con-noi', 'lavoraconnoi', 'carriere', 'careers',
+        'cerchiamo', 'cercasi', 'ricerca agent', 'ricerca rappresentant', 'ricerca procacciat',
+        'ricerca commercial', 'ricerca vendit', 'selezioniamo', 'selezione', 'candidat', 
+        'invia cv', 'invia il tuo cv', 'curriculum', 'diventa nostro agente', 'diventa agente',
+        'collabora con noi', 'collabora-con-noi', 'posizioni aperte', 'posizione aperta',
+        'opportunità di lavoro', 'opportunità per agent', 'ampliamento rete', 'entrare nella rete'
+    ]
+    if not any(ss in testo_completo for ss in segnali_selezione):
+        return False
+        
+    return True
+
 def main():
     colonna_b_master = worksheet.col_values(2)
     colonna_b_prospect = worksheet_prospect.col_values(2)
     
-    # Legge sia i link completi (https://...) sia i domini già bonificati (nomeazienda.it)
     domini_inseriti = set()
     for link in colonna_b_master[1:] + colonna_b_prospect[1:]:
         if link:
@@ -119,20 +155,16 @@ def main():
         azione = random.choice(azioni)
         settore = random.choice(settori)
         provincia = random.choice(province)
-        pagina = random.choice([1, 2, 3, 4])
+        # Pagine 1 e 2 per evitare che Google ignori le virgolette su pagine troppo profonde
+        pagina = random.choice([1, 2])
         
-        filtro_pmi = ' (srl OR "s.r.l." OR snc OR sas)' if random.random() < 0.6 else ''
-        
-        chiave_combo = f"{azione}_{settore}_{provincia}_{pagina}_{filtro_pmi}"
+        chiave_combo = f"{azione}_{settore}_{provincia}_{pagina}"
         if chiave_combo in combinazioni_usate:
             continue
         combinazioni_usate.add(chiave_combo)
         
-        query = (
-            f'{azione} {settore} {provincia}{filtro_pmi} '
-            f'-immobiliare -franchising -associazione -corsi -multinazionale -global -holding'
-        )
-        print(f"Eseguo query PMI (Pag. {pagina}): {query}")
+        query = f'{azione} {settore} {provincia} -immobiliare -assicurazioni -franchising -concorso'
+        print(f"Eseguo query mirata (Pag. {pagina}): {query}")
         
         url = "https://google.serper.dev/search"
         payload_dict = {
@@ -170,6 +202,7 @@ def main():
             
             for item in risultati:
                 titolo = item.get('title', 'Sito Aziendale')
+                snippet = item.get('snippet', '')
                 link_originale = item.get('link', '')
                 link = link_originale.lower()
                 
@@ -177,10 +210,14 @@ def main():
                     continue
                     
                 titolo_lower = titolo.lower()
-                if any(p in titolo_lower for p in ['immobiliare', 'incontri', 'cerco ragazza', 'trans ', 'concorso pubblico', 'multinazionale']):
+                if any(p in titolo_lower for p in ['immobiliare', 'incontri', 'cerco ragazza', 'trans ', 'concorso pubblico', 'multinazionale', 'bokep', 'porn']):
                     continue
                     
                 if any(path_vietato in link for path_vietato in path_da_escludere):
+                    continue
+                
+                # CONTROLLO DI PERTINENZA: Salva il link solo se parla davvero di ricerca/selezione agenti o Lavora con noi
+                if not ha_segnali_reali_ricerca_agenti(titolo, snippet, link):
                     continue
                     
                 dominio_estratto = estrai_dominio(link)
@@ -206,7 +243,7 @@ def main():
     if dati_da_inserire:
         try:
             worksheet.append_rows(dati_da_inserire, value_input_option='USER_ENTERED')
-            print(f"✅ Aggiunti con successo {len(dati_da_inserire)} prospect PMI puliti!")
+            print(f"✅ Aggiunti con successo {len(dati_da_inserire)} annunci REALI di ricerca agenti!")
         except Exception as e_sheet:
             print(f"⚠️ Errore durante il salvataggio su Google Sheet: {e_sheet}")
     else:
