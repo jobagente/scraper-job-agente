@@ -100,7 +100,8 @@ siti_da_escludere = [
     'commercialagents-italy', 'just.it', 'reddit.com', 'calameo.com', 'faciletrovare',
     'atoka.io', 'empresite', 'pornhub', 'xhamster', 'bokep', 'porndig', 'assinews',
     'realemutua', 'groupama', 'unipol', 'allianz', 'generali', 'grandiscuole.it', 
-    'cepulavoro', 'issuu.com', 'archive.org', 'gowork.it', 'casagenti.it', 'vorwerk.com'
+    'cepulavoro', 'issuu.com', 'archive.org', 'gowork.it', 'casagenti.it', 'vorwerk.com',
+    'studocu.com', 'halleyweb.com', 'mondobirra.org'
 ]
 
 path_da_escludere = [
