@@ -52,6 +52,19 @@ def estrai_dominio(testo_url):
         return urlparse(t).netloc.replace('www.', '')
     return t.split('/')[0].replace('www.', '')
 
+def email_valida(e):
+    """Verifica che l'email sia reale e non un segnaposto/PEC."""
+    if not e or "@" not in e: return False
+    e_low = e.strip().lower()
+    if e_low in ("nessuna", "--"): return False
+    falsi_positivi = [
+        'pec@', '@pec', '.pec.', 'legalmail', 'postacert', 'certificata',
+        'sicurezzapostale', 'telecompost', '@cert.', 'pcert.it', 'arubapec',
+        'nome@', 'esempio@', 'example@', 'test@', 'tuamail@', 'tuaemail@',
+        '@azienda.it', '@dominio.it', '@email.it', '@esempio.it', '@example.com', '@domain.com'
+    ]
+    return not any(fp in e_low for fp in falsi_positivi)
+
 def cerca_id_hubspot_contact(dominio, nome_azienda):
     if not hubspot_token: return None
     url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
@@ -73,26 +86,108 @@ def cerca_id_hubspot_contact(dominio, nome_azienda):
     except: pass
     return None
 
-def check_hubspot_contact(dominio, nome_azienda):
-    return cerca_id_hubspot_contact(dominio, nome_azienda) is not None
-
-def aggiorna_hubspot_referente(contact_id, nome_dm, ruolo_dm, email_dm, email_generica):
-    if not hubspot_token or not contact_id: return
+def arricchisci_contatto_hubspot_esistente(contact_id, url_sito=None, email_generica=None, nome_dm=None, ruolo_dm=None, email_dm=None, settore=None, telefono=None, citta=None, regione=None):
+    """
+    Legge i dati già presenti nella scheda HubSpot e AGGIUNGE i nuovi dati (referente, telefono, email)
+    SENZA MAI cancellare o sovrascrivere le informazioni già presenti.
+    """
+    if not hubspot_token or not contact_id: return "Già in HubSpot"
     headers = {'Authorization': f'Bearer {hubspot_token}', 'Content-Type': 'application/json'}
+    campi = "email,hs_additional_emails,referente,phone,settore,city,state,website"
+    url_get = f"https://api.hubapi.com/crm/v3/objects/contacts/{contact_id}?properties={campi}"
     
-    ruolo = ruolo_dm.upper() if ruolo_dm != "NESSUNO" else ""
-    properties = {
-        "referente": f"{nome_dm.upper()} {ruolo}".strip()
-    }
-    if email_dm and "@" in email_dm and email_dm != "nessuna":
-        properties["email"] = email_dm
-        if email_generica and "@" in email_generica and email_generica != "nessuna" and email_generica != email_dm:
-            properties["hs_additional_emails"] = email_generica
-            
     try:
-        url_patch = f"https://api.hubapi.com/crm/v3/objects/contacts/{contact_id}"
-        requests.patch(url_patch, headers=headers, json={"properties": properties}, timeout=15)
-    except: pass
+        res_get = requests.get(url_get, headers=headers, timeout=15)
+        if res_get.status_code != 200:
+            return "Già in HubSpot"
+        props_attuali = res_get.json().get("properties", {}) or {}
+    except Exception:
+        return "Già in HubSpot"
+
+    aggiornamenti = {}
+
+    # 1. REFERENTE: aggiunge il nuovo referente senza cancellare quello esistente
+    if nome_dm and nome_dm != "SCONOSCIUTO":
+        ruolo = ruolo_dm.upper() if (ruolo_dm and ruolo_dm != "NESSUNO") else ""
+        nuovo_ref = f"{nome_dm.upper()} {ruolo}".strip()
+        ref_attuale = (props_attuali.get("referente") or "").strip()
+        
+        if not ref_attuale or ref_attuale == "--":
+            aggiornamenti["referente"] = nuovo_ref
+        elif nome_dm.upper() not in ref_attuale.upper():
+            aggiornamenti["referente"] = f"{ref_attuale} / {nuovo_ref}"
+
+    # 2. TELEFONO: se manca lo inserisce; se c'è già un numero diverso, accoda il nuovo con " / "
+    if telefono and telefono != "--":
+        tel_nuovo = telefono.strip()
+        tel_attuale = (props_attuali.get("phone") or "").strip()
+        cifre_nuovo = re.sub(r'\D', '', tel_nuovo)
+        cifre_attuale = re.sub(r'\D', '', tel_attuale)
+        
+        if not tel_attuale or tel_attuale == "--":
+            aggiornamenti["phone"] = tel_nuovo
+        elif cifre_nuovo and cifre_nuovo not in cifre_attuale:
+            aggiornamenti["phone"] = f"{tel_attuale} / {tel_nuovo}"
+
+    # 3. EMAIL: mantiene SEMPRE l'email primaria esistente e aggiunge le nuove in hs_additional_emails
+    email_attuale = (props_attuali.get("email") or "").strip().lower()
+    add_attuali_str = (props_attuali.get("hs_additional_emails") or "").strip().lower()
+    lista_add = [e.strip() for e in re.split(r'[;,]', add_attuali_str) if e.strip()]
+    
+    tutte_esistenti = set()
+    if email_attuale:
+        tutte_esistenti.add(email_attuale)
+    tutte_esistenti.update(lista_add)
+
+    nuove_email_da_valutare = []
+    if email_valida(email_dm):
+        nuove_email_da_valutare.append(email_dm.strip().lower())
+    if email_valida(email_generica):
+        nuove_email_da_valutare.append(email_generica.strip().lower())
+
+    for e_cand in nuove_email_da_valutare:
+        if e_cand not in tutte_esistenti:
+            if not email_attuale:
+                # Il contatto su HubSpot era completamente privo di email primaria
+                email_attuale = e_cand
+                aggiornamenti["email"] = e_cand
+                tutte_esistenti.add(e_cand)
+            else:
+                # C'è già un'email primaria: aggiunge la nuova tra le email secondarie
+                lista_add.append(e_cand)
+                tutte_esistenti.add(e_cand)
+
+    if lista_add:
+        nuova_str_add = ";".join(lista_add)
+        if nuova_str_add != add_attuali_str:
+            aggiornamenti["hs_additional_emails"] = nuova_str_add
+
+    # 4. CAMPI COMPLEMENTARI (Settore, Città, Regione, Website): compilati solo se vuoti su HubSpot
+    if settore and settore != "--" and not (props_attuali.get("settore") or "").strip():
+        aggiornamenti["settore"] = settore.upper()
+    if citta and citta != "--" and not (props_attuali.get("city") or "").strip():
+        aggiornamenti["city"] = citta.upper()
+    if regione and regione != "--" and not (props_attuali.get("state") or "").strip():
+        aggiornamenti["state"] = regione.upper()
+    if url_sito and not (props_attuali.get("website") or "").strip():
+        aggiornamenti["website"] = url_sito
+
+    if aggiornamenti:
+        try:
+            url_patch = f"https://api.hubapi.com/crm/v3/objects/contacts/{contact_id}"
+            res_patch = requests.patch(url_patch, headers=headers, json={"properties": aggiornamenti}, timeout=15)
+            if res_patch.status_code == 200:
+                return "Già in HubSpot (Arricchito)"
+            elif "hs_additional_emails" in aggiornamenti:
+                # Se una delle email aggiuntive appartiene già a un'altra scheda in HubSpot, salva comunque referente e telefono
+                del aggiornamenti["hs_additional_emails"]
+                if aggiornamenti:
+                    requests.patch(url_patch, headers=headers, json={"properties": aggiornamenti}, timeout=15)
+                    return "Già in HubSpot (Arricchito)"
+        except Exception:
+            pass
+
+    return "Già in HubSpot"
 
 def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_dm, email_dm, settore, telefono, citta, regione):
     if not hubspot_token: return "Token mancante"
@@ -117,12 +212,12 @@ def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_
         ruolo = ruolo_dm.upper() if ruolo_dm != "NESSUNO" else ""
         properties["referente"] = f"{nome_dm.upper()} {ruolo}".strip()
         
-    email_primaria = email_dm if (email_dm and "@" in email_dm and email_dm != "nessuna") else email_generica
-    email_secondaria = email_generica if (email_primaria == email_dm) else None
+    email_primaria = email_dm if email_valida(email_dm) else (email_generica if email_valida(email_generica) else None)
+    email_secondaria = email_generica if (email_primaria == email_dm and email_valida(email_generica)) else None
 
-    if email_primaria and "@" in email_primaria and email_primaria != "nessuna":
+    if email_primaria:
         properties["email"] = email_primaria
-        if email_secondaria and "@" in email_secondaria and email_secondaria != "nessuna" and email_secondaria != email_primaria:
+        if email_secondaria and email_secondaria != email_primaria:
             properties["hs_additional_emails"] = email_secondaria
         
     try:
@@ -201,10 +296,15 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
     headers = {'X-API-KEY': serper_api_key, 'Content-Type': 'application/json'}
     
     dominio_email = dominio
-    if email_generica and "@" in email_generica and email_generica != "nessuna":
+    if email_valida(email_generica):
         dom_estratto = email_generica.split("@")[-1].strip().lower()
-        provider_generici = {'gmail.com', 'libero.it', 'virgilio.it', 'alice.it', 'tin.it', 'tiscali.it', 'hotmail.com', 'hotmail.it', 'outlook.com', 'outlook.it', 'yahoo.com', 'yahoo.it', 'icloud.com', 'email.it'}
-        if dom_estratto and dom_estratto not in provider_generici:
+        provider_generici = {
+            'gmail.com', 'libero.it', 'virgilio.it', 'alice.it', 'tin.it', 'tiscali.it', 
+            'hotmail.com', 'hotmail.it', 'outlook.com', 'outlook.it', 'yahoo.com', 'yahoo.it', 
+            'icloud.com', 'email.it', 'azienda.it', 'dominio.it', 'esempio.it', 'example.com', 
+            'test.it', 'pcert.it', 'arubapec.it', 'legalmail.it', 'pec.it', 'postecert.it'
+        }
+        if dom_estratto and dom_estratto not in provider_generici and not any(p in dom_estratto for p in ['pec', 'cert', 'legalmail']):
             dominio_email = dom_estratto
     
     try:
@@ -337,13 +437,16 @@ def integra_referenti_mancanti(worksheet_assistente, dati_prospect):
             
             if nome_dm != "SCONOSCIUTO":
                 ref_completo = f"{nome_dm.upper()} {ruolo_dm.upper()}".strip()
-                email_ref_finale = email_dm if email_dm != "nessuna" else ""
+                email_ref_finale = email_dm if email_valida(email_dm) else ""
                 
                 worksheet_assistente.update(values=[[ref_completo, email_ref_finale]], range_name=f"G{num_riga_sheet}:H{num_riga_sheet}")
                 
                 contact_id = cerca_id_hubspot_contact(dominio_az, nome_az)
                 if contact_id:
-                    aggiorna_hubspot_referente(contact_id, nome_dm, ruolo_dm, email_ref_finale, email_az)
+                    arricchisci_contatto_hubspot_esistente(
+                        contact_id, url_sito=url_az, email_generica=email_az,
+                        nome_dm=nome_dm, ruolo_dm=ruolo_dm, email_dm=email_ref_finale
+                    )
                     
                 print(f"✅ Integrato con successo: {ref_completo} | {email_ref_finale}")
                 time.sleep(2)
@@ -408,7 +511,12 @@ def main():
                 emails_trovate = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', res_web.text)
                 
                 esclusioni_file = ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.js', '.css', 'sentry.io')
-                esclusioni_pec = ['pec@', '@pec', '.pec.', 'legalmail', 'postacert', 'certificata', 'sicurezzapostale', 'telecompost', '@cert.']
+                esclusioni_pec = [
+                    'pec@', '@pec', '.pec.', 'legalmail', 'postacert', 'certificata', 
+                    'sicurezzapostale', 'telecompost', '@cert.', 'pcert.it', 'arubapec',
+                    'nome@', 'esempio@', 'example@', 'test@', 'tuamail@', 'tuaemail@',
+                    '@azienda.it', '@dominio.it', '@email.it', '@esempio.it', '@example.com', '@domain.com'
+                ]
                 
                 emails_pulite = list(set([
                     e.lower() for e in emails_trovate 
@@ -446,7 +554,7 @@ def main():
                 - Verisure o venditoriadistanza.it.
                 
                 2. NOME_AZIENDA: VERO nome del brand/azienda mandante. (Se ESCLUSO scrivi SCONOSCIUTO).
-                3. EMAIL: Indirizzo email di contatto. (Nota: ho estratto questa email nascosta dal codice sorgente: {email_suggerita}. Usala come prima scelta valida. Se non c'è, cercala nel testo. Se completamente assente scrivi NESSUNA).
+                3. EMAIL: Indirizzo email di contatto REALE (NON inserire mai email finte di esempio come nome@azienda.it né indirizzi PEC come @pcert.it o @legalmail.it. Nota: ho estratto questa email dal codice sorgente: {email_suggerita}. Usala se valida, altrimenti cercala nel testo. Se assente scrivi NESSUNA).
                 4. SETTORE: Breve specifica del settore nel quale opera l'azienda. Se non chiaro scrivi "--".
                 5. TELEFONO: Numero di telefono principale. Escludi numeri di FAX o numeri di assistenza tecnica. Se non lo trovi scrivi "--".
                 6. CITTA: La città della sede. Se non è un capoluogo di provincia, aggiungi la sigla della provincia (es. "BUSTO ARSIZIO VA"). Se non la trovi scrivi "--".
@@ -469,6 +577,8 @@ def main():
                         esito = parti[0].strip().upper() if len(parti) > 0 else "SCONOSCIUTO"
                         nome_reale = parti[1].strip() if len(parti) > 1 else "SCONOSCIUTO"
                         email = parti[2].strip().lower() if len(parti) > 2 else "NESSUNA"
+                        if not email_valida(email):
+                            email = "NESSUNA"
                         settore = parti[3].strip() if len(parti) > 3 else "--"
                         
                         telefono_sito = parti[4].strip() if len(parti) > 4 else "--"
@@ -493,8 +603,6 @@ def main():
                         print(f"Salto inserimento {nome_reale}: già presente in Nuovi Prospect.")
                         continue
 
-                    esiste_in_crm = check_hubspot_contact(dominio, nome_reale)
-                    
                     nome_dm, ruolo_dm, email_dm = cerca_decision_maker_osint(nome_reale, dominio, email)
                     
                     tel_google, ind_google = cerca_dati_aziendali_osint(nome_reale)
@@ -508,8 +616,21 @@ def main():
                         if citta_g != "--": citta_finale = citta_g
                         if reg_g != "--": regione_finale = reg_g
                     
-                    if esiste_in_crm:
-                        stato_crm = "Già in HubSpot"
+                    # Controlla se il contatto esiste già su HubSpot: se esiste, aggiunge i nuovi dati senza cancellare i vecchi
+                    contact_id_esistente = cerca_id_hubspot_contact(dominio, nome_reale)
+                    if contact_id_esistente:
+                        stato_crm = arricchisci_contatto_hubspot_esistente(
+                            contact_id_esistente,
+                            url_sito=url_sito,
+                            email_generica=email,
+                            nome_dm=nome_dm,
+                            ruolo_dm=ruolo_dm,
+                            email_dm=email_dm,
+                            settore=settore,
+                            telefono=telefono_finale,
+                            citta=citta_finale,
+                            regione=regione_finale
+                        )
                     else:
                         stato_crm = crea_hubspot_contact(
                             nome_reale, url_sito, email, nome_dm, ruolo_dm, email_dm, 
@@ -517,8 +638,8 @@ def main():
                         )
                         
                     referente_completo = f"{nome_dm.upper()} {ruolo_dm.upper()}".strip() if nome_dm != "SCONOSCIUTO" else "--"
-                    email_referente_finale = email_dm if email_dm != "nessuna" else "NESSUNA"
-                    email_azienda_finale = email if email != "nessuna" else ""
+                    email_referente_finale = email_dm if email_valida(email_dm) else "NESSUNA"
+                    email_azienda_finale = email if email_valida(email) else ""
                     
                     nuova_riga = [
                         nome_reale.upper(),
