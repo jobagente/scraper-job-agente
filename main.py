@@ -404,18 +404,26 @@ def main():
                 testo = soup.get_text(separator=' ', strip=True)[:10000]
                 
                 prompt_web = f"""
-                Analizza questo testo di una pagina web per una società di ricerca agenti.
+                Analizza questo testo di una pagina web per una società di ricerca e selezione agenti di commercio.
+                URL della pagina: {url_sito}
+                Titolo pagina: {titolo}
+                
                 Estrai 7 informazioni chiave in modo sintetico:
                 
-                1. ESITO: Classifica in "AGENTE" (se cercano P.IVA e sono PMI/mandanti B2B validi) o "DIPENDENTE".
-                REGOLE DI ESCLUSIONE - Se rientra qui scrivi "ESCLUSO":
+                1. ESITO: Classifica in "AGENTE", "DIPENDENTE" oppure "ESCLUSO".
+                REGOLA TASSATIVA PER "AGENTE":
+                Scrivi "AGENTE" SOLO ED ESCLUSIVAMENTE se nella pagina è presente un annuncio, una sezione "Lavora con noi / Collabora con noi" o un invito ESPLICITO a candidarsi / inviare il CV per diventare Agente di Commercio, Rappresentante, Venditore a P.IVA o Procacciatore.
+                
+                REGOLE DI ESCLUSIONE - Scrivi TASSATIVAMENTE "ESCLUSO" se rientra in uno di questi casi:
+                - La pagina è una normale Homepage, pagina "Chi siamo", pagina "Prodotti/Servizi" o "Contatti" in cui NON c'è alcuna ricerca aperta di agenti o venditori.
+                - La pagina "Rete vendita / Punti vendita / Distributori" serve solo ai clienti finali per trovare il rivenditore o l'agente di zona, ma NON contiene un annuncio di ricerca di nuovi agenti.
                 - Multinazionali estere, colossi industriali globali o società quotate in borsa (cerchiamo solo PMI e aziende italiane snelle).
                 - Vendita diretta a domicilio / incaricati alle vendite / network marketing (es. Just, Folletto, Avon, Herbalife).
-                - Portali di annunci generici, blog di notizie o agenzie interinali.
-                - Agenzie immobiliari, assicurative o mediazione creditizia.
+                - Portali di annunci generici, directory di aziende (es. Atoka, Empresite), blog di notizie o agenzie interinali.
+                - Agenzie immobiliari, assicurative, finanziarie, noleggio auto/NCC o tour operator/viaggi.
                 - Aziende contratti Luce, Gas, Energia, Telefonia.
                 - Concessionarie auto o automotive.
-                - Agenzie/studi consulenza per agenti.
+                - Agenzie/studi consulenza per agenti o software CRM per agenti.
                 - Verisure o venditoriadistanza.it.
                 
                 2. NOME_AZIENDA: VERO nome del brand/azienda mandante. (Se ESCLUSO scrivi SCONOSCIUTO).
