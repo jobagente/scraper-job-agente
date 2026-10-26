@@ -103,7 +103,8 @@ siti_da_escludere = [
     'studocu.com', 'halleyweb.com', 'mondobirra.org', 'manstar', 'kompass', 
     'europages', 'informazione-aziende', 'ufficiocamerale', 'fatturatoitalia', 
     'signalhire', 'rocketreach', 'zoominfo', 'dnb.com', 'crunchbase',
-    '.edu.it', '.gov.it', 'lavoraconnoi.com', 'gazzettadellavoro.com', 'globelife.com', '360forma.com'
+    '.edu.it', '.gov.it', 'lavoraconnoi.com', 'gazzettadellavoro.com', 'globelife.com', 
+    '360forma.com', 'xing.com', 'academia.edu', 'professioneagente.it', 'go2sales.it'
 ]
 
 path_da_escludere = [
@@ -112,7 +113,7 @@ path_da_escludere = [
     '/corporate/', '/investors/', 'careers.', 'jobs.', '/prodotti/', 
     '/product/', '/portfolio/', '/case-study/', '/caso-studio/', 
     '/punti-vendita', '/trova-rivendit', '/account/', '/magazine/',
-    '/companies/', '/company/', '/aziende/', '/azienda/', '/directory/'
+    '/companies/', '/company/', '/aziende/', '/azienda/', '/directory/', '/profile/'
 ]
 
 def estrai_dominio(testo_url):
@@ -124,6 +125,10 @@ def estrai_dominio(testo_url):
 
 def ha_segnali_reali_ricerca_agenti(titolo, snippet, link):
     testo_completo = f"{titolo} {snippet} {link}".lower()
+    
+    # Blocca articoli che parlano di "agenti AI" / intelligenza artificiale o agenti patogeni/chimici
+    if any(escl in testo_completo for escl in ['agenti ai', 'agente ai', 'agenti ia', 'intelligenza artificiale', 'agenti patogeni', 'agenti chimici', 'agenti cancerogeni']):
+        return False
     
     # Esclude pagine che sono palesemente homepage/cataloghi senza alcun cenno a lavoro o agenti
     parole_target = ['agent', 'rappresentant', 'procacciat', 'vendit', 'commercial', 'plurimandat', 'monomandat', 'enasarco']
@@ -155,7 +160,7 @@ def main():
     dati_da_inserire = []
     combinazioni_usate = set()
 
-    # 85 ricerche bilanciate tra Settore, Area Geografica e Pagine 1-4 per scavalcare i 1.460 domini già noti
+    # 85 ricerche bilanciate tra Settore, Area Geografica e Pagine 1-4 per scavalcare i domini già noti
     for _ in range(85):
         azione = random.choice(azioni)
         settore = random.choice(settori)
@@ -178,7 +183,7 @@ def main():
             continue
         combinazioni_usate.add(chiave_combo)
         
-        query = f'{query_base} -immobiliare -assicurazioni -franchising -concorso -subito -indeed'
+        query = f'{query_base} -immobiliare -assicurazioni -franchising -concorso -subito -indeed -"agenti ai"'
         print(f"Eseguo query (Pag. {pagina}): {query}")
         
         url = "https://google.serper.dev/search"
@@ -224,7 +229,7 @@ def main():
                     continue
                     
                 titolo_lower = titolo.lower()
-                if any(p in titolo_lower for p in ['immobiliare', 'incontri', 'cerco ragazza', 'trans ', 'concorso pubblico', 'multinazionale', 'bokep', 'porn']):
+                if any(p in titolo_lower for p in ['immobiliare', 'incontri', 'cerco ragazza', 'trans ', 'concorso pubblico', 'multinazionale', 'bokep', 'porn', 'agenti ai', 'intelligenza artificiale']):
                     continue
                     
                 if any(path_vietato in link for path_vietato in path_da_escludere):
