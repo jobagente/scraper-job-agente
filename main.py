@@ -33,6 +33,18 @@ HEADERS_BROWSER = {
     'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7'
 }
 
+AGGREGATORI_DA_BLOCCARE = (
+    'manstar', 'kompass', 'europages', 'informazione-aziende', 'ufficiocamerale',
+    'fatturatoitalia', 'signalhire', 'rocketreach', 'zoominfo', 'dnb.com',
+    'crunchbase', 'atoka.io', 'empresite', 'gowork.it', 'casagenti.it',
+    'xing.com', 'academia.edu', '.edu.it', '.gov.it', 'lavoraconnoi.com',
+    'gazzettadellavoro.com', 'globelife.com', '360forma.com'
+)
+
+PATH_AGGREGATORI_DA_BLOCCARE = (
+    '/companies/', '/company/', '/aziende/', '/azienda/', '/directory/', '/profile/'
+)
+
 def pulisci_nome_azienda(nome):
     if not nome: return ""
     pulito = re.sub(r'(?i)\b(s\.r\.l\.|srl|s\.p\.a\.|spa|s\.n\.c\.|snc|s\.a\.s\.|sas|s\.r\.l\.s\.|srls|s\.c\.a\.r\.l\.|soc\.\s*coop\.|unipersonale|semplificata)\b', '', nome)
@@ -53,7 +65,7 @@ def estrai_dominio(testo_url):
     return t.split('/')[0].replace('www.', '')
 
 def email_valida(e):
-    """Verifica che l'email sia reale e non un segnaposto/PEC."""
+    """Verifica che l'email sia reale e non un segnaposto/PEC/aggregatore."""
     if not e or "@" not in e: return False
     e_low = e.strip().lower()
     if e_low in ("nessuna", "--"): return False
@@ -61,7 +73,8 @@ def email_valida(e):
         'pec@', '@pec', '.pec.', 'legalmail', 'postacert', 'certificata',
         'sicurezzapostale', 'telecompost', '@cert.', 'pcert.it', 'arubapec',
         'nome@', 'esempio@', 'example@', 'test@', 'tuamail@', 'tuaemail@',
-        '@azienda.it', '@dominio.it', '@email.it', '@esempio.it', '@example.com', '@domain.com'
+        '@azienda.it', '@dominio.it', '@email.it', '@esempio.it', '@example.com',
+        '@domain.com', '@manstar.org', '@xing.com'
     ]
     return not any(fp in e_low for fp in falsi_positivi)
 
@@ -227,6 +240,22 @@ def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_
             return "Inserito in HubSpot"
         else:
             errore = res.json().get("message", "Errore sconosciuto")
+            # Se l'email esiste già su HubSpot (es. Existing ID: ...), recupera l'ID e arricchisce la scheda senza sovrascrivere!
+            match_id = re.search(r'Existing ID:\s*(\d+)', errore)
+            if match_id:
+                existing_id = match_id.group(1)
+                return arricchisci_contatto_hubspot_esistente(
+                    existing_id,
+                    url_sito=url_sito,
+                    email_generica=email_generica,
+                    nome_dm=nome_dm,
+                    ruolo_dm=ruolo_dm,
+                    email_dm=email_dm,
+                    settore=settore,
+                    telefono=telefono,
+                    citta=citta,
+                    regione=regione
+                )
             return f"Errore CRM: {errore}"
     except Exception as e:
         return f"Errore CRM"
@@ -302,7 +331,8 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
             'gmail.com', 'libero.it', 'virgilio.it', 'alice.it', 'tin.it', 'tiscali.it', 
             'hotmail.com', 'hotmail.it', 'outlook.com', 'outlook.it', 'yahoo.com', 'yahoo.it', 
             'icloud.com', 'email.it', 'azienda.it', 'dominio.it', 'esempio.it', 'example.com', 
-            'test.it', 'pcert.it', 'arubapec.it', 'legalmail.it', 'pec.it', 'postecert.it'
+            'test.it', 'pcert.it', 'arubapec.it', 'legalmail.it', 'pec.it', 'postecert.it',
+            'manstar.org', 'xing.com'
         }
         if dom_estratto and dom_estratto not in provider_generici and not any(p in dom_estratto for p in ['pec', 'cert', 'legalmail']):
             dominio_email = dom_estratto
@@ -431,6 +461,8 @@ def integra_referenti_mancanti(worksheet_assistente, dati_prospect):
         
         if nome_az and url_az and not referente_att:
             dominio_az = estrai_dominio(url_az)
+            if any(agg in dominio_az for agg in AGGREGATORI_DA_BLOCCARE):
+                continue
             print(f"🔄 Integrazione referente mancante per riga {num_riga_sheet}: {nome_az} ({dominio_az})")
             
             nome_dm, ruolo_dm, email_dm = cerca_decision_maker_osint(nome_az, dominio_az, email_az)
@@ -495,6 +527,14 @@ def main():
         if url_sito and not esito_attuale:
             numero_riga = i + 1
             dominio = estrai_dominio(url_sito)
+            url_low = url_sito.lower()
+            
+            # Blocco preventivo immediato se l'URL appartiene a un aggregatore, social o ente scolastico (es. manstar.org, xing.com, .edu.it)
+            if any(agg in dominio for agg in AGGREGATORI_DA_BLOCCARE) or any(p_agg in url_low for p_agg in PATH_AGGREGATORI_DA_BLOCCARE):
+                print(f"Salto riga {numero_riga} ({dominio}): portale aggregatore/directory o social escluso.")
+                worksheet_master.update(values=[[dominio, "Portale / Directory", "ESCLUSO", data_odierna]], range_name=f"B{numero_riga}:E{numero_riga}")
+                time.sleep(1.5)
+                continue
             
             if dominio in domini_gia_in_prospect:
                 print(f"Salto riga {numero_riga} ({dominio}): dominio già presente in Nuovi Prospect.")
@@ -515,7 +555,8 @@ def main():
                     'pec@', '@pec', '.pec.', 'legalmail', 'postacert', 'certificata', 
                     'sicurezzapostale', 'telecompost', '@cert.', 'pcert.it', 'arubapec',
                     'nome@', 'esempio@', 'example@', 'test@', 'tuamail@', 'tuaemail@',
-                    '@azienda.it', '@dominio.it', '@email.it', '@esempio.it', '@example.com', '@domain.com'
+                    '@azienda.it', '@dominio.it', '@email.it', '@esempio.it', '@example.com',
+                    '@domain.com', '@manstar.org', '@xing.com'
                 ]
                 
                 emails_pulite = list(set([
@@ -533,20 +574,23 @@ def main():
                 prompt_web = f"""
                 Analizza questo testo di una pagina web per una società di ricerca e selezione agenti di commercio.
                 URL della pagina: {url_sito}
+                Dominio della pagina: {dominio}
                 Titolo pagina: {titolo}
                 
                 Estrai 7 informazioni chiave in modo sintetico:
                 
                 1. ESITO: Classifica in "AGENTE", "DIPENDENTE" oppure "ESCLUSO".
                 REGOLA TASSATIVA PER "AGENTE":
-                Scrivi "AGENTE" SOLO ED ESCLUSIVAMENTE se nella pagina è presente un annuncio, una sezione "Lavora con noi / Collabora con noi" o un invito ESPLICITO a candidarsi / inviare il CV per diventare Agente di Commercio, Rappresentante, Venditore a P.IVA o Procacciatore.
+                Scrivi "AGENTE" SOLO ED ESCLUSIVAMENTE se nella pagina (che deve appartenere al sito ufficiale di un'azienda italiana/operante in Italia) è presente un annuncio, una sezione "Lavora con noi / Collabora con noi" o un invito ESPLICITO a candidarsi / inviare il CV per diventare Agente di Commercio, Rappresentante, Venditore a P.IVA o Procacciatore.
                 
                 REGOLE DI ESCLUSIONE - Scrivi TASSATIVAMENTE "ESCLUSO" se rientra in uno di questi casi:
-                - La pagina è una normale Homepage, pagina "Chi siamo", pagina "Prodotti/Servizi" o "Contatti" in cui NON c'è alcuna ricerca aperta di agenti o venditori.
+                - Il dominio ({dominio}) NON è il sito web ufficiale dell'azienda che cerca agenti, ma è un portale di annunci, aggregatore, social network o directory (es. manstar.org, xing.com, kompass, atoka, empresite, siti scolastici .edu.it, ecc.).
+                - La pagina è una normale Homepage, pagina "Chi siamo", pagina "Prodotti/Servizi", "Blog/News" o "Contatti" in cui NON c'è alcuna ricerca aperta di agenti o venditori.
+                - La pagina parla di "Agenti AI" (Intelligenza Artificiale, chatbot, software AI) e non di Agenti di Commercio umani.
+                - Produttori esteri asiatici/cinesi con sito tradotto automaticamente in italiano (senza sede operativa in Italia) o multinazionali globali / società quotate in borsa (cerchiamo solo PMI e aziende italiane snelle).
                 - La pagina "Rete vendita / Punti vendita / Distributori" serve solo ai clienti finali per trovare il rivenditore o l'agente di zona, ma NON contiene un annuncio di ricerca di nuovi agenti.
-                - Multinazionali estere, colossi industriali globali o società quotate in borsa (cerchiamo solo PMI e aziende italiane snelle).
                 - Vendita diretta a domicilio / incaricati alle vendite / network marketing (es. Just, Folletto, Avon, Herbalife).
-                - Portali di annunci generici, directory di aziende (es. Atoka, Empresite), blog di notizie o agenzie interinali.
+                - Portali di annunci generici, directory di aziende, blog di notizie o agenzie interinali.
                 - Agenzie immobiliari, assicurative, finanziarie, noleggio auto/NCC, scuole di recupero anni scolastici o tour operator/viaggi.
                 - Aziende contratti Luce, Gas, Energia, Telefonia.
                 - Concessionarie auto o automotive.
@@ -554,7 +598,7 @@ def main():
                 - Verisure o venditoriadistanza.it.
                 
                 2. NOME_AZIENDA: VERO nome del brand/azienda mandante. (Se ESCLUSO scrivi SCONOSCIUTO).
-                3. EMAIL: Indirizzo email di contatto REALE (NON inserire mai email finte di esempio come nome@azienda.it né indirizzi PEC come @pcert.it o @legalmail.it. Nota: ho estratto questa email dal codice sorgente: {email_suggerita}. Usala se valida, altrimenti cercala nel testo. Se assente scrivi NESSUNA).
+                3. EMAIL: Indirizzo email di contatto REALE dell'azienda (NON inserire mai email finte di esempio come nome@azienda.it, né email di portali esterni come @manstar.org, né indirizzi PEC come @pcert.it o @legalmail.it. Nota: ho estratto questa email dal codice sorgente: {email_suggerita}. Usala se valida, altrimenti cercala nel testo. Se assente scrivi NESSUNA).
                 4. SETTORE: Breve specifica del settore nel quale opera l'azienda. Se non chiaro scrivi "--".
                 5. TELEFONO: Numero di telefono principale. Escludi numeri di FAX o numeri di assistenza tecnica. Se non lo trovi scrivi "--".
                 6. CITTA: La città della sede. Se non è un capoluogo di provincia, aggiungi la sigla della provincia (es. "BUSTO ARSIZIO VA"). Se non la trovi scrivi "--".
