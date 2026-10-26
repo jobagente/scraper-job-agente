@@ -31,25 +31,22 @@ except Exception as e:
     print(f"Errore di connessione al foglio: {e}")
     exit(1)
 
-# Query mirate su vere pagine "Lavora con noi" e annunci diretti di ricerca agenti
 azioni = [
-    'inurl:lavora-con-noi "agenti"',
-    'inurl:lavora-con-noi "agente"',
-    'inurl:lavoraconnoi "agenti"',
-    'intitle:"lavora con noi" "agenti"',
-    'intitle:"lavora con noi" "agente di commercio"',
-    '"lavora con noi" "cerchiamo agenti"',
-    '"lavora con noi" "ricerca agenti"',
-    '"lavora con noi" "agenti plurimandatari"',
-    '"lavora con noi" "agenti monomandatari"',
-    '"cerchiamo agenti" "invia"',
-    '"cercasi agenti" "curriculum"',
-    '"selezioniamo agenti" "lavora con noi"',
+    '"lavora con noi" "agenti"',
+    '"lavora con noi" "agente di commercio"',
+    '"cerchiamo agenti"',
+    '"ricerca agenti"',
+    '"cercasi agenti"',
+    '"selezioniamo agenti"',
     '"diventa nostro agente"',
-    '"collabora con noi" "agenti di commercio"',
-    '"ampliamento rete vendita" "lavora con noi"',
-    '"ricerca rappresentanti" "lavora con noi"',
-    '"ricerca procacciatori" "lavora con noi"'
+    '"collabora con noi" "agenti"',
+    '"agenti plurimandatari"',
+    '"agenti monomandatari"',
+    '"ricerca rappresentanti"',
+    '"ricerca procacciatori"',
+    '"ampliamento rete vendita" "agenti"',
+    'inurl:lavora-con-noi "agenti"',
+    'intitle:"lavora con noi" "agenti"'
 ]
 
 settori = [
@@ -60,14 +57,16 @@ settori = [
     "termoidraulica", "illuminazione", "serramenti", "antinfortunistica", 
     "forniture industriali", "macchinari", "oleodinamica", "elettrotecnica",
     "carpenteria", "stampaggio", "automazione industriale", "detergenza",
-    "estetica professionale", "ricambi", "componentistica", "bevande", "vini"
+    "estetica professionale", "ricambi", "componentistica", "bevande", "vini",
+    "medical devices", "ortopedia", "cartotecnica", "etichettificio", "vernici"
 ]
 
 province = [
     "Milano", "Brescia", "Verona", "Torino", "Bologna", "Roma", "Padova", "Vicenza", 
     "Treviso", "Bergamo", "Firenze", "Napoli", "Varese", "Monza", "Como", "Modena", 
     "Parma", "Reggio Emilia", "Cuneo", "Udine", "Pordenone", "Lecco", "Novara",
-    "Mantova", "Cremona", "Piacenza", "Rimini", "Ancona", "Bari", "Lombardia", "Veneto", "Emilia", "Piemonte"
+    "Mantova", "Cremona", "Piacenza", "Rimini", "Ancona", "Bari", "Lombardia", 
+    "Veneto", "Emilia Romagna", "Piemonte", "Toscana", "Marche"
 ]
 
 siti_da_escludere = [
@@ -101,7 +100,10 @@ siti_da_escludere = [
     'atoka.io', 'empresite', 'pornhub', 'xhamster', 'bokep', 'porndig', 'assinews',
     'realemutua', 'groupama', 'unipol', 'allianz', 'generali', 'grandiscuole.it', 
     'cepulavoro', 'issuu.com', 'archive.org', 'gowork.it', 'casagenti.it', 'vorwerk.com',
-    'studocu.com', 'halleyweb.com', 'mondobirra.org'
+    'studocu.com', 'halleyweb.com', 'mondobirra.org', 'manstar', 'kompass', 
+    'europages', 'informazione-aziende', 'ufficiocamerale', 'fatturatoitalia', 
+    'signalhire', 'rocketreach', 'zoominfo', 'dnb.com', 'crunchbase',
+    '.edu.it', '.gov.it', 'lavoraconnoi.com', 'gazzettadellavoro.com', 'globelife.com', '360forma.com'
 ]
 
 path_da_escludere = [
@@ -109,7 +111,8 @@ path_da_escludere = [
     '/articolo/', '/economia/', '/storia-', '/incontri', '/global/', 
     '/corporate/', '/investors/', 'careers.', 'jobs.', '/prodotti/', 
     '/product/', '/portfolio/', '/case-study/', '/caso-studio/', 
-    '/punti-vendita', '/trova-rivendit', '/account/', '/magazine/'
+    '/punti-vendita', '/trova-rivendit', '/account/', '/magazine/',
+    '/companies/', '/company/', '/aziende/', '/azienda/', '/directory/'
 ]
 
 def estrai_dominio(testo_url):
@@ -122,17 +125,16 @@ def estrai_dominio(testo_url):
 def ha_segnali_reali_ricerca_agenti(titolo, snippet, link):
     testo_completo = f"{titolo} {snippet} {link}".lower()
     
+    # Esclude pagine che sono palesemente homepage/cataloghi senza alcun cenno a lavoro o agenti
     parole_target = ['agent', 'rappresentant', 'procacciat', 'vendit', 'commercial', 'plurimandat', 'monomandat', 'enasarco']
     if not any(pt in testo_completo for pt in parole_target):
         return False
         
     segnali_selezione = [
-        'lavora con noi', 'lavora-con-noi', 'lavoraconnoi', 'carriere', 'careers',
-        'cerchiamo', 'cercasi', 'ricerca agent', 'ricerca rappresentant', 'ricerca procacciat',
-        'ricerca commercial', 'ricerca vendit', 'selezioniamo', 'selezione', 'candidat', 
-        'invia cv', 'invia il tuo cv', 'curriculum', 'diventa nostro agente', 'diventa agente',
-        'collabora con noi', 'collabora-con-noi', 'posizioni aperte', 'posizione aperta',
-        'opportunità di lavoro', 'opportunità per agent', 'ampliamento rete', 'entrare nella rete'
+        'lavora', 'job', 'carriere', 'careers', 'cerchiamo', 'cercasi', 
+        'ricerca', 'ricerchiamo', 'selezion', 'candidat', 'invia', 'curriculum', 
+        'diventa', 'collabora', 'posizion', 'opportunità', 'ampliamento', 
+        'inserimento', 'plurimandat', 'monomandat', 'enasarco', 'mandato'
     ]
     if not any(ss in testo_completo for ss in segnali_selezione):
         return False
@@ -153,19 +155,31 @@ def main():
     dati_da_inserire = []
     combinazioni_usate = set()
 
-    for _ in range(75):
+    # 85 ricerche bilanciate tra Settore, Area Geografica e Pagine 1-4 per scavalcare i 1.460 domini già noti
+    for _ in range(85):
         azione = random.choice(azioni)
         settore = random.choice(settori)
         provincia = random.choice(province)
-        pagina = random.choice([1, 2])
+        pagina = random.choice([1, 2, 3, 4])
         
-        chiave_combo = f"{azione}_{settore}_{provincia}_{pagina}"
+        modalita = random.choice([1, 2, 3])
+        if modalita == 1:
+            # Ricerca per Azione + Settore su tutta Italia (altissima resa di annunci reali)
+            query_base = f'{azione} {settore}'
+        elif modalita == 2:
+            # Ricerca per Azione + Settore + Provincia/Regione
+            query_base = f'{azione} {settore} {provincia}'
+        else:
+            # Ricerca PMI per Azione + Provincia/Regione + Srl/Spa
+            query_base = f'{azione} {provincia} (srl OR spa)'
+            
+        chiave_combo = f"{query_base}_{pagina}"
         if chiave_combo in combinazioni_usate:
             continue
         combinazioni_usate.add(chiave_combo)
         
-        query = f'{azione} {settore} {provincia} -immobiliare -assicurazioni -franchising -concorso'
-        print(f"Eseguo query mirata (Pag. {pagina}): {query}")
+        query = f'{query_base} -immobiliare -assicurazioni -franchising -concorso -subito -indeed'
+        print(f"Eseguo query (Pag. {pagina}): {query}")
         
         url = "https://google.serper.dev/search"
         payload_dict = {
@@ -197,8 +211,7 @@ def main():
             
             risultati = data.get('organic', [])
             if not risultati:
-                print("Nessun risultato utile.")
-                time.sleep(1.5)
+                time.sleep(1.2)
                 continue
             
             for item in risultati:
@@ -238,7 +251,7 @@ def main():
         if len(dati_da_inserire) >= 100:
             break
             
-        time.sleep(1.5)
+        time.sleep(1.2)
 
     if dati_da_inserire:
         try:
