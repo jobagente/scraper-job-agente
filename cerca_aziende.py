@@ -104,7 +104,10 @@ siti_da_escludere = [
     'europages', 'informazione-aziende', 'ufficiocamerale', 'fatturatoitalia', 
     'signalhire', 'rocketreach', 'zoominfo', 'dnb.com', 'crunchbase',
     '.edu.it', '.gov.it', 'lavoraconnoi.com', 'gazzettadellavoro.com', 'globelife.com', 
-    '360forma.com', 'xing.com', 'academia.edu', 'professioneagente.it', 'go2sales.it'
+    '360forma.com', 'xing.com', 'academia.edu', 'professioneagente.it', 'go2sales.it',
+    'tutto626.it', 'claude.com', 'job4italy.com', 'trendsrl.net', 'profili.it',
+    'gesacom.it', 'federprivacy.org', 'affida.credit', 'credipass.it',
+    'sellapersonalcredit.it', 'vivienergia.it', 'trasparenza-valutazione-merito.it'
 ]
 
 path_da_escludere = [
