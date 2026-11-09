@@ -29,9 +29,10 @@ scopes = [
 creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
 gc = gspread.authorize(creds)
 
+# Timeout esteso a 60 secondi (60000 ms) contro i picchi di carico Google
 client = genai.Client(
     api_key=gemini_api_key,
-    http_options=types.HttpOptions(timeout=25000)
+    http_options=types.HttpOptions(timeout=60000)
 )
 
 HEADERS_BROWSER = {
@@ -79,7 +80,7 @@ def scarica_pagina_sicura(url_sito, timeout_sec=10):
             if chunk:
                 chunks.append(chunk)
                 bytes_letti += len(chunk)
-            if bytes_letti > 400000 or (time.time() - inizio) > timeout_sec:
+            if bytes_letti > 350000 or (time.time() - inizio) > timeout_sec:
                 break
         raw_bytes = b"".join(chunks)
         encoding = r.encoding or 'utf-8'
@@ -89,24 +90,42 @@ def chiama_gemini_con_fallback(prompt, pausa_iniziale=5):
     if pausa_iniziale > 0:
         time.sleep(pausa_iniziale)
     ultimo_errore = None
-    for tentativo in range(1, 4):
+    cfg_veloce = types.GenerateContentConfig(
+        thinking_config=types.ThinkingConfig(thinking_budget=0),
+        temperature=0.1
+    )
+    for tentativo in range(1, 5):
         try:
-            risp = client.models.generate_content(
-                model=MODELLO_ATTIVO,
-                contents=prompt
-            )
+            try:
+                risp = client.models.generate_content(
+                    model=MODELLO_ATTIVO,
+                    contents=prompt,
+                    config=cfg_veloce
+                )
+            except Exception as e_cfg:
+                if 'thinking' in str(e_cfg).lower() or '400' in str(e_cfg):
+                    risp = client.models.generate_content(
+                        model=MODELLO_ATTIVO,
+                        contents=prompt
+                    )
+                else:
+                    raise e_cfg
             if risp and risp.text:
                 return risp.text.strip()
         except Exception as e:
             ultimo_errore = e
             err_str = str(e).lower()
             if any(k in err_str for k in ('429', 'quota', 'exhausted', 'rate')):
-                print(f"   ⏳ Limite Free Tier (tentativo {tentativo}/3). Attendo 22s...")
+                print(f"   ⏳ Limite Free Tier ({tentativo}/4). Attendo 22s...")
                 time.sleep(22)
+            elif any(k in err_str for k in ('503', '504', 'deadline', 'unavailable', 'overloaded')):
+                attesa = 10 * tentativo
+                print(f"   ⏳ Server Google sovraccarichi ({tentativo}/4). Attendo {attesa}s...")
+                time.sleep(attesa)
             else:
-                print(f"   ⚠️ Errore temporaneo Gemini ({tentativo}/3): {e}. Riprovo...")
+                print(f"   ⚠️ Errore temporaneo Gemini ({tentativo}/4): {e}. Riprovo...")
                 time.sleep(6)
-    raise RuntimeError(f"Gemini non ha risposto dopo 3 tentativi: {ultimo_errore}")
+    raise RuntimeError(f"Gemini non ha risposto dopo 4 tentativi: {ultimo_errore}")
 
 def pulisci_nome_azienda(nome):
     if not nome:
@@ -693,7 +712,9 @@ def main():
                     if soup.title and soup.title.string
                     else "Sito Aziendale"
                 )
-                testo = soup.get_text(separator=' ', strip=True)[:10000]
+                for tag in soup(["script", "style", "nav", "footer", "svg", "noscript"]):
+                    tag.decompose()
+                testo = soup.get_text(separator=' ', strip=True)[:4500]
                 
                 prompt_web = f"""
                 Analizza questo testo di una pagina web per una società di ricerca e selezione agenti di commercio.
