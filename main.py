@@ -33,7 +33,7 @@ HEADERS_BROWSER = {
     'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7'
 }
 
-MODELLI_GEMINI = ['gemini-2.5-flash', 'gemini-3.6-flash', 'gemini-2.0-flash']
+MODELLI_GEMINI = ['gemini-2.5-flash', 'gemini-2.0-flash']
 
 AGGREGATORI_DA_BLOCCARE = (
     'manstar', 'kompass', 'europages', 'informazione-aziende', 'ufficiocamerale',
@@ -50,25 +50,20 @@ PATH_AGGREGATORI_DA_BLOCCARE = (
     '/companies/', '/company/', '/aziende/', '/azienda/', '/directory/', '/profile/'
 )
 
-def chiama_gemini_con_fallback(prompt, pausa_iniziale=5):
-    """Chiama Gemini provando in sequenza i modelli disponibili per evitare blocchi da quota o modello deprecato."""
+def chiama_gemini_con_fallback(prompt, pausa_iniziale=6):
+    """Chiama Gemini in modo rapido passando subito al modello di backup senza attese lunghe."""
     if pausa_iniziale > 0:
         time.sleep(pausa_iniziale)
     ultimo_errore = None
     for modello in MODELLI_GEMINI:
-        for tentativo in range(2):
-            try:
-                risp = client.models.generate_content(model=modello, contents=prompt)
-                if risp and risp.text:
-                    return risp.text.strip()
-            except Exception as e:
-                ultimo_errore = e
-                errore_str = str(e).lower()
-                # Se il modello non esiste (404 / not found), passa subito al modello successivo
-                if '404' in errore_str or 'not found' in errore_str or 'not supported' in errore_str:
-                    break
-                time.sleep(12)
-    raise RuntimeError(f"Tutti i modelli Gemini hanno fallito. Ultimo errore: {ultimo_errore}")
+        try:
+            risp = client.models.generate_content(model=modello, contents=prompt)
+            if risp and risp.text:
+                return risp.text.strip()
+        except Exception as e:
+            ultimo_errore = e
+            time.sleep(4)
+    raise RuntimeError(f"Modelli Gemini non disponibili: {ultimo_errore}")
 
 def pulisci_nome_azienda(nome):
     if not nome: return ""
@@ -116,7 +111,7 @@ def cerca_id_hubspot_contact(dominio, nome_azienda):
         ]
     }
     try:
-        res = requests.post(url, headers=headers, json=payload, timeout=15)
+        res = requests.post(url, headers=headers, json=payload, timeout=12)
         if res.status_code == 200:
             results = res.json().get('results', [])
             if results:
@@ -135,7 +130,7 @@ def arricchisci_contatto_hubspot_esistente(contact_id, url_sito=None, email_gene
     url_get = f"https://api.hubapi.com/crm/v3/objects/contacts/{contact_id}?properties={campi}"
     
     try:
-        res_get = requests.get(url_get, headers=headers, timeout=15)
+        res_get = requests.get(url_get, headers=headers, timeout=12)
         if res_get.status_code != 200:
             return "Già in HubSpot"
         props_attuali = res_get.json().get("properties", {}) or {}
@@ -211,13 +206,13 @@ def arricchisci_contatto_hubspot_esistente(contact_id, url_sito=None, email_gene
     if aggiornamenti:
         try:
             url_patch = f"https://api.hubapi.com/crm/v3/objects/contacts/{contact_id}"
-            res_patch = requests.patch(url_patch, headers=headers, json={"properties": aggiornamenti}, timeout=15)
+            res_patch = requests.patch(url_patch, headers=headers, json={"properties": aggiornamenti}, timeout=12)
             if res_patch.status_code == 200:
                 return "Già in HubSpot (Arricchito)"
             elif "hs_additional_emails" in aggiornamenti:
                 del aggiornamenti["hs_additional_emails"]
                 if aggiornamenti:
-                    requests.patch(url_patch, headers=headers, json={"properties": aggiornamenti}, timeout=15)
+                    requests.patch(url_patch, headers=headers, json={"properties": aggiornamenti}, timeout=12)
                     return "Già in HubSpot (Arricchito)"
         except Exception:
             pass
@@ -257,7 +252,7 @@ def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_
         
     try:
         url_cont = "https://api.hubapi.com/crm/v3/objects/contacts"
-        res = requests.post(url_cont, headers=headers, json={"properties": properties}, timeout=15)
+        res = requests.post(url_cont, headers=headers, json={"properties": properties}, timeout=12)
         if res.status_code in (200, 201):
             return "Inserito in HubSpot"
         else:
@@ -291,7 +286,7 @@ def cerca_dati_aziendali_osint(nome_azienda):
     headers = {'X-API-KEY': serper_api_key, 'Content-Type': 'application/json'}
     
     try:
-        res = requests.post(url, headers=headers, data=payload, timeout=15)
+        res = requests.post(url, headers=headers, data=payload, timeout=12)
         if res.status_code == 200:
             data = res.json()
             telefono = None
@@ -327,7 +322,7 @@ def formatta_indirizzo_osint(indirizzo):
     if not indirizzo: return "--", "--"
     prompt = f"Estrai Città (con sigla provincia se non è capoluogo) e Regione da questo indirizzo: '{indirizzo}'.\nRispondi ESATTAMENTE su una sola riga nel formato: CITTA | REGIONE\nSe manca un dato scrivi --."
     try:
-        testo_risp = chiama_gemini_con_fallback(prompt, pausa_iniziale=3)
+        testo_risp = chiama_gemini_con_fallback(prompt, pausa_iniziale=2)
         parti = testo_risp.replace("*", "").split('|')
         citta = parti[0].strip().upper() if len(parti) > 0 else "--"
         regione = parti[1].strip().upper() if len(parti) > 1 else "--"
@@ -362,21 +357,21 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         
         # LIVELLO 1: Ricerca su tutto linkedin.com/in con nome pulito (senza "Group/Srl") e ruoli target
         q1 = f'site:linkedin.com/in "{azienda_linkedin}" (Commerciale OR Vendite OR Sales OR Direttore OR HR OR CEO OR Titolare OR Amministratore OR Socio OR Owner)'
-        res1 = requests.post(url, headers=headers, data=json.dumps({"q": q1, "gl": "it", "hl": "it"}), timeout=15)
+        res1 = requests.post(url, headers=headers, data=json.dumps({"q": q1, "gl": "it", "hl": "it"}), timeout=12)
         if res1.status_code == 200:
             risultati = res1.json().get('organic', [])
             
         # LIVELLO 2: Ricerca più ampia su LinkedIn per nome base o dominio
         if not risultati:
             q2 = f'site:linkedin.com/in ("{azienda_linkedin}" OR "{radice_dominio}" OR "{dominio}")'
-            res2 = requests.post(url, headers=headers, data=json.dumps({"q": q2, "gl": "it", "hl": "it"}), timeout=15)
+            res2 = requests.post(url, headers=headers, data=json.dumps({"q": q2, "gl": "it", "hl": "it"}), timeout=12)
             if res2.status_code == 200:
                 risultati = res2.json().get('organic', [])
                 
         # LIVELLO 3: Se l'azienda è una PMI non presente su LinkedIn, cerca sul web pubblico
         if not risultati:
             q3 = f'("{azienda_pulita}" OR "{dominio}") ("Direttore Commerciale" OR "Responsabile Vendite" OR "Responsabile Commerciale" OR "Amministratore Unico" OR "Amministratore Delegato" OR "Titolare" OR "CEO")'
-            res3 = requests.post(url, headers=headers, data=json.dumps({"q": q3, "gl": "it", "hl": "it"}), timeout=15)
+            res3 = requests.post(url, headers=headers, data=json.dumps({"q": q3, "gl": "it", "hl": "it"}), timeout=12)
             if res3.status_code == 200:
                 risultati = res3.json().get('organic', [])
                 
@@ -416,7 +411,7 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         """
         
         try:
-            testo_risp = chiama_gemini_con_fallback(prompt, pausa_iniziale=4)
+            testo_risp = chiama_gemini_con_fallback(prompt, pausa_iniziale=3)
             testo_pulito = testo_risp.replace("*", "").replace("Nome:", "").replace("Ruolo:", "").replace("Email:", "")
             parti = testo_pulito.split('|')
             
@@ -455,7 +450,7 @@ def bonifica_link_scartati(worksheet_master, dati):
     if conteggio_bonificati > 0:
         print(f"🛡️ Bonifica anti-phishing: disinnesco {conteggio_bonificati} URL scartati in Foglio1...")
         worksheet_master.update(values=modifiche_col_b, range_name=f"B2:B{len(dati)}")
-        time.sleep(2)
+        time.sleep(1.5)
 
 # =======================================================
 # FUNZIONE DI INTEGRAZIONE AUTOMATICA CONTATTI SENZA REFERENTE (ULTIMI 20)
@@ -496,11 +491,11 @@ def integra_referenti_mancanti(worksheet_assistente, dati_prospect):
                     )
                     
                 print(f"✅ Integrato con successo: {ref_completo} | {email_ref_finale}")
-                time.sleep(2)
+                time.sleep(1.5)
             else:
                 worksheet_assistente.update(values=[["--", "NESSUNA"]], range_name=f"G{num_riga_sheet}:H{num_riga_sheet}")
                 print(f"ℹ️ Nessun profilo LinkedIn pubblico trovato per {nome_az}.")
-                time.sleep(1.5)
+                time.sleep(1.0)
 
 def main():
     URL_FOGLIO = "https://docs.google.com/spreadsheets/d/15K6_SNBTB-QBNwFB2L6Qjrd56wZ7clD3Tm9zM-MI7zc/edit?gid=0#gid=0" 
@@ -548,25 +543,25 @@ def main():
             if any(agg in dominio for agg in AGGREGATORI_DA_BLOCCARE) or any(p_agg in url_low for p_agg in PATH_AGGREGATORI_DA_BLOCCARE):
                 print(f"Salto riga {numero_riga} ({dominio}): portale aggregatore/directory o social escluso.")
                 worksheet_master.update(values=[[dominio, "Portale / Directory", "ESCLUSO", data_odierna]], range_name=f"B{numero_riga}:E{numero_riga}")
-                time.sleep(1.5)
+                time.sleep(1.0)
                 continue
             
             if dominio in domini_gia_in_prospect:
                 print(f"Salto riga {numero_riga} ({dominio}): dominio già presente in Nuovi Prospect.")
                 worksheet_master.update(values=[[dominio, "Già in Nuovi Prospect", "DUPLICATO", data_odierna]], range_name=f"B{numero_riga}:E{numero_riga}")
-                time.sleep(1.5)
+                time.sleep(1.0)
                 continue
 
             print(f"Processo riga {numero_riga}: {url_sito}")
             
             # 3A. Scaricamento pagina web (se fallisce qui, il sito è davvero irraggiungibile)
             try:
-                res_web = requests.get(url_sito, headers=HEADERS_BROWSER, timeout=15, verify=False)
+                res_web = requests.get(url_sito, headers=HEADERS_BROWSER, timeout=10, verify=False)
                 res_web.raise_for_status()
             except Exception as e_web:
                 print(f"❌ Sito non raggiungibile ({url_sito}): {e_web}")
                 worksheet_master.update(values=[[dominio, "Sito non raggiungibile", "ERRORE", data_odierna]], range_name=f"B{numero_riga}:E{numero_riga}")
-                time.sleep(1.5)
+                time.sleep(1.0)
                 continue
 
             # 3B. Analisi IA e integrazione CRM (se Gemini ha un problema temporaneo, NON brucia la riga!)
@@ -633,7 +628,7 @@ def main():
                 Testo: {testo}
                 """
                 
-                testo_risposta = chiama_gemini_con_fallback(prompt_web, pausa_iniziale=15)
+                testo_risposta = chiama_gemini_con_fallback(prompt_web, pausa_iniziale=6)
                 parti = testo_risposta.replace("*", "").split('|')
                 
                 esito = parti[0].strip().upper() if len(parti) > 0 else "SCONOSCIUTO"
@@ -651,7 +646,7 @@ def main():
                     worksheet_master.update(values=[[dominio, titolo, esito, data_odierna]], range_name=f"B{numero_riga}:E{numero_riga}")
                 else:
                     worksheet_master.update(values=[[titolo, esito, data_odierna]], range_name=f"C{numero_riga}:E{numero_riga}")
-                time.sleep(1.5) 
+                time.sleep(1.0)
                 
                 if "AGENTE" in esito:
                     nome_pulito = pulisci_nome_azienda(nome_reale)
@@ -716,7 +711,7 @@ def main():
                 
             except Exception as e_ia:
                 print(f"⚠️ Errore IA/Elaborazione su riga {numero_riga} ({url_sito}): {e_ia}. Riga lasciata in coda per il prossimo avvio.")
-                time.sleep(5)
+                time.sleep(3)
 
 if __name__ == "__main__":
     main()
