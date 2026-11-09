@@ -107,7 +107,9 @@ siti_da_escludere = [
     '360forma.com', 'xing.com', 'academia.edu', 'professioneagente.it', 'go2sales.it',
     'tutto626.it', 'claude.com', 'job4italy.com', 'trendsrl.net', 'profili.it',
     'gesacom.it', 'federprivacy.org', 'affida.credit', 'credipass.it',
-    'sellapersonalcredit.it', 'vivienergia.it', 'trasparenza-valutazione-merito.it'
+    'sellapersonalcredit.it', 'vivienergia.it', 'trasparenza-valutazione-merito.it',
+    'jimdoweb.com', 'webnode.it', 'made-in-china.com', 'alibaba.com',
+    'agriaffaires.', 'machineryzone.', 'noleggiamoauto.it'
 ]
 
 path_da_escludere = [
