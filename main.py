@@ -13,7 +13,6 @@ from google.oauth2.service_account import Credentials
 from urllib.parse import urlparse
 from datetime import datetime
 
-# Forza la stampa immediata nei log di GitHub Actions
 sys.stdout.reconfigure(line_buffering=True)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -23,18 +22,24 @@ hubspot_token = os.environ.get('HUBSPOT_ACCESS_TOKEN')
 serper_api_key = os.environ.get('SERPER_API_KEY')
 
 creds_dict = json.loads(creds_json)
-scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+scopes = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
 creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
 gc = gspread.authorize(creds)
 
-# Timeout rigido di 25 secondi (25000 ms) per evitare che il client Gemini resti appeso
 client = genai.Client(
     api_key=gemini_api_key,
     http_options=types.HttpOptions(timeout=25000)
 )
 
 HEADERS_BROWSER = {
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'User-Agent': (
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+        'AppleWebKit/537.36 (KHTML, like Gecko) '
+        'Chrome/124.0.0.0 Safari/537.36'
+    ),
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7'
 }
@@ -59,8 +64,13 @@ PATH_AGGREGATORI_DA_BLOCCARE = (
 )
 
 def scarica_pagina_sicura(url_sito, timeout_sec=10):
-    """Scarica l'HTML evitando di restare bloccati su siti in streaming infinito o file giganti."""
-    with requests.get(url_sito, headers=HEADERS_BROWSER, timeout=(6, timeout_sec), verify=False, stream=True) as r:
+    with requests.get(
+        url_sito,
+        headers=HEADERS_BROWSER,
+        timeout=(6, timeout_sec),
+        verify=False,
+        stream=True
+    ) as r:
         r.raise_for_status()
         chunks = []
         bytes_letti = 0
@@ -76,29 +86,37 @@ def scarica_pagina_sicura(url_sito, timeout_sec=10):
         return raw_bytes.decode(encoding, errors='replace')
 
 def chiama_gemini_con_fallback(prompt, pausa_iniziale=5):
-    """Chiama gemini-3.8-flash gestendo i limiti al minuto del piano gratuito senza bloccarsi né saltare righe."""
     if pausa_iniziale > 0:
         time.sleep(pausa_iniziale)
     ultimo_errore = None
     for tentativo in range(1, 4):
         try:
-            risp = client.models.generate_content(model=MODELLO_ATTIVO, contents=prompt)
+            risp = client.models.generate_content(
+                model=MODELLO_ATTIVO,
+                contents=prompt
+            )
             if risp and risp.text:
                 return risp.text.strip()
         except Exception as e:
             ultimo_errore = e
             err_str = str(e).lower()
-            if '429' in err_str or 'quota' in err_str or 'exhausted' in err_str or 'rate' in err_str:
-                print(f"   ⏳ Limite richieste/minuto Free Tier raggiunto (tentativo {tentativo}/3). Attendo 22s e riprovo...")
+            if any(k in err_str for k in ('429', 'quota', 'exhausted', 'rate')):
+                print(f"   ⏳ Limite Free Tier (tentativo {tentativo}/3). Attendo 22s...")
                 time.sleep(22)
             else:
-                print(f"   ⚠️ Timeout/Errore temporaneo Gemini (tentativo {tentativo}/3): {e}. Riprovo tra 6s...")
+                print(f"   ⚠️ Errore temporaneo Gemini ({tentativo}/3): {e}. Riprovo...")
                 time.sleep(6)
     raise RuntimeError(f"Gemini non ha risposto dopo 3 tentativi: {ultimo_errore}")
 
 def pulisci_nome_azienda(nome):
-    if not nome: return ""
-    pulito = re.sub(r'(?i)\b(s\.r\.l\.|srl|s\.p\.a\.|spa|s\.n\.c\.|snc|s\.a\.s\.|sas|s\.r\.l\.s\.|srls|s\.c\.a\.r\.l\.|soc\.\s*coop\.|unipersonale|semplificata)\b', '', nome)
+    if not nome:
+        return ""
+    pattern_forme = (
+        r'(?i)\b(s\.r\.l\.|srl|s\.p\.a\.|spa|s\.n\.c\.|snc|'
+        r's\.a\.s\.|sas|s\.r\.l\.s\.|srls|s\.c\.a\.r\.l\.|'
+        r'soc\.\s*coop\.|unipersonale|semplificata)\b'
+    )
+    pulito = re.sub(pattern_forme, '', nome)
     return re.sub(r'\s+', ' ', pulito).strip().upper()
 
 def pulisci_nome_per_linkedin(nome):
@@ -108,16 +126,19 @@ def pulisci_nome_per_linkedin(nome):
     return ridotto if len(ridotto) >= 3 else base
 
 def estrai_dominio(testo_url):
-    if not testo_url: return ""
+    if not testo_url:
+        return ""
     t = testo_url.strip().lower()
     if "://" in t:
         return urlparse(t).netloc.replace('www.', '')
     return t.split('/')[0].replace('www.', '')
 
 def email_valida(e):
-    if not e or "@" not in e: return False
+    if not e or "@" not in e:
+        return False
     e_low = e.strip().lower()
-    if e_low in ("nessuna", "--"): return False
+    if e_low in ("nessuna", "--"):
+        return False
     falsi_positivi = [
         'pec@', '@pec', '.pec.', 'legalmail', 'postacert', 'certificata',
         'sicurezzapostale', 'telecompost', '@cert.', 'pcert.it', 'arubapec',
@@ -128,11 +149,14 @@ def email_valida(e):
     return not any(fp in e_low for fp in falsi_positivi)
 
 def cerca_id_hubspot_contact(dominio, nome_azienda):
-    if not hubspot_token: return None
+    if not hubspot_token:
+        return None
     url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
-    headers = {'Authorization': f'Bearer {hubspot_token}', 'Content-Type': 'application/json'}
+    headers = {
+        'Authorization': f'Bearer {hubspot_token}',
+        'Content-Type': 'application/json'
+    }
     azienda_pulita = pulisci_nome_azienda(nome_azienda)
-    
     payload = {
         "filterGroups": [
             {"filters": [{"propertyName": "website", "operator": "CONTAINS_TOKEN", "value": dominio}]},
@@ -145,12 +169,21 @@ def cerca_id_hubspot_contact(dominio, nome_azienda):
             results = res.json().get('results', [])
             if results:
                 return results[0].get('id')
-    except: pass
+    except Exception:
+        pass
     return None
 
-def arricchisci_contatto_hubspot_esistente(contact_id, url_sito=None, email_generica=None, nome_dm=None, ruolo_dm=None, email_dm=None, settore=None, telefono=None, citta=None, regione=None):
-    if not hubspot_token or not contact_id: return "Già in HubSpot"
-    headers = {'Authorization': f'Bearer {hubspot_token}', 'Content-Type': 'application/json'}
+def arricchisci_contatto_hubspot_esistente(
+    contact_id, url_sito=None, email_generica=None, nome_dm=None,
+    ruolo_dm=None, email_dm=None, settore=None, telefono=None,
+    citta=None, regione=None
+):
+    if not hubspot_token or not contact_id:
+        return "Già in HubSpot"
+    headers = {
+        'Authorization': f'Bearer {hubspot_token}',
+        'Content-Type': 'application/json'
+    }
     campi = "email,hs_additional_emails,referente,phone,settore,city,state,website"
     url_get = f"https://api.hubapi.com/crm/v3/objects/contacts/{contact_id}?properties={campi}"
     
@@ -168,7 +201,6 @@ def arricchisci_contatto_hubspot_esistente(contact_id, url_sito=None, email_gene
         ruolo = ruolo_dm.upper() if (ruolo_dm and ruolo_dm != "NESSUNO") else ""
         nuovo_ref = f"{nome_dm.upper()} {ruolo}".strip()
         ref_attuale = (props_attuali.get("referente") or "").strip()
-        
         if not ref_attuale or ref_attuale == "--":
             aggiornamenti["referente"] = nuovo_ref
         elif nome_dm.upper() not in ref_attuale.upper():
@@ -179,7 +211,6 @@ def arricchisci_contatto_hubspot_esistente(contact_id, url_sito=None, email_gene
         tel_attuale = (props_attuali.get("phone") or "").strip()
         cifre_nuovo = re.sub(r'\D', '', tel_nuovo)
         cifre_attuale = re.sub(r'\D', '', tel_attuale)
-        
         if not tel_attuale or tel_attuale == "--":
             aggiornamenti["phone"] = tel_nuovo
         elif cifre_nuovo and cifre_nuovo not in cifre_attuale:
@@ -227,29 +258,44 @@ def arricchisci_contatto_hubspot_esistente(contact_id, url_sito=None, email_gene
     if aggiornamenti:
         try:
             url_patch = f"https://api.hubapi.com/crm/v3/objects/contacts/{contact_id}"
-            res_patch = requests.patch(url_patch, headers=headers, json={"properties": aggiornamenti}, timeout=10)
+            res_patch = requests.patch(
+                url_patch,
+                headers=headers,
+                json={"properties": aggiornamenti},
+                timeout=10
+            )
             if res_patch.status_code == 200:
                 return "Già in HubSpot (Arricchito)"
             elif "hs_additional_emails" in aggiornamenti:
                 del aggiornamenti["hs_additional_emails"]
                 if aggiornamenti:
-                    requests.patch(url_patch, headers=headers, json={"properties": aggiornamenti}, timeout=10)
+                    requests.patch(
+                        url_patch,
+                        headers=headers,
+                        json={"properties": aggiornamenti},
+                        timeout=10
+                    )
                     return "Già in HubSpot (Arricchito)"
         except Exception:
             pass
 
     return "Già in HubSpot"
 
-def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_dm, email_dm, settore, telefono, citta, regione):
-    if not hubspot_token: return "Token mancante"
-    headers = {'Authorization': f'Bearer {hubspot_token}', 'Content-Type': 'application/json'}
-    
+def crea_hubspot_contact(
+    nome_azienda, url_sito, email_generica, nome_dm, ruolo_dm,
+    email_dm, settore, telefono, citta, regione
+):
+    if not hubspot_token:
+        return "Token mancante"
+    headers = {
+        'Authorization': f'Bearer {hubspot_token}',
+        'Content-Type': 'application/json'
+    }
     properties = {
         "firstname": nome_azienda.upper(),
         "company": nome_azienda.upper(),
         "website": url_sito
     }
-    
     if settore and settore != "--":
         properties["settore"] = settore.upper()
     if telefono and telefono != "--":
@@ -258,13 +304,19 @@ def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_
         properties["city"] = citta.upper()
     if regione and regione != "--":
         properties["state"] = regione.upper()
-    
     if nome_dm and nome_dm != "SCONOSCIUTO":
         ruolo = ruolo_dm.upper() if ruolo_dm != "NESSUNO" else ""
         properties["referente"] = f"{nome_dm.upper()} {ruolo}".strip()
         
-    email_primaria = email_dm if email_valida(email_dm) else (email_generica if email_valida(email_generica) else None)
-    email_secondaria = email_generica if (email_primaria == email_dm and email_valida(email_generica)) else None
+    email_primaria = (
+        email_dm if email_valida(email_dm)
+        else (email_generica if email_valida(email_generica) else None)
+    )
+    email_secondaria = (
+        email_generica
+        if (email_primaria == email_dm and email_valida(email_generica))
+        else None
+    )
 
     if email_primaria:
         properties["email"] = email_primaria
@@ -273,7 +325,12 @@ def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_
         
     try:
         url_cont = "https://api.hubapi.com/crm/v3/objects/contacts"
-        res = requests.post(url_cont, headers=headers, json={"properties": properties}, timeout=10)
+        res = requests.post(
+            url_cont,
+            headers=headers,
+            json={"properties": properties},
+            timeout=10
+        )
         if res.status_code in (200, 201):
             return "Inserito in HubSpot"
         else:
@@ -294,15 +351,14 @@ def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_
                     regione=regione
                 )
             return f"Errore CRM: {errore}"
-    except Exception as e:
-        return f"Errore CRM"
+    except Exception:
+        return "Errore CRM"
 
 def cerca_dati_aziendali_osint(nome_azienda):
-    if not serper_api_key or nome_azienda == "SCONOSCIUTO": return None, None
-        
+    if not serper_api_key or nome_azienda == "SCONOSCIUTO":
+        return None, None
     url = "https://google.serper.dev/search"
     azienda_pulita = pulisci_nome_azienda(nome_azienda)
-    
     payload = json.dumps({"q": azienda_pulita, "gl": "it", "hl": "it"})
     headers = {'X-API-KEY': serper_api_key, 'Content-Type': 'application/json'}
     
@@ -312,19 +368,16 @@ def cerca_dati_aziendali_osint(nome_azienda):
             data = res.json()
             telefono = None
             indirizzo = None
-            
             kg = data.get('knowledgeGraph', {})
             if kg:
                 telefono = kg.get('phoneNumber')
                 indirizzo = kg.get('address')
-                
                 if not telefono:
                     attr = kg.get('attributes', {})
                     for key, val in attr.items():
                         if 'telefon' in key.lower() or 'phone' in key.lower():
                             telefono = val
                             break
-            
             if not telefono or not indirizzo:
                 places = data.get('places', [])
                 for place in places:
@@ -334,26 +387,32 @@ def cerca_dati_aziendali_osint(nome_azienda):
                         indirizzo = place.get('address')
                     if telefono and indirizzo:
                         break
-                        
             return telefono, indirizzo
-    except Exception: pass
+    except Exception:
+        pass
     return None, None
 
 def formatta_indirizzo_osint(indirizzo):
-    if not indirizzo: return "--", "--"
-    prompt = f"Estrai Città (con sigla provincia se non è capoluogo) e Regione da questo indirizzo: '{indirizzo}'.\nRispondi ESATTAMENTE su una sola riga nel formato: CITTA | REGIONE\nSe manca un dato scrivi --."
+    if not indirizzo:
+        return "--", "--"
+    prompt = (
+        f"Estrai Città (con sigla provincia se non è capoluogo) e Regione "
+        f"da questo indirizzo: '{indirizzo}'.\n"
+        f"Rispondi ESATTAMENTE su una sola riga nel formato: CITTA | REGIONE\n"
+        f"Se manca un dato scrivi --."
+    )
     try:
         testo_risp = chiama_gemini_con_fallback(prompt, pausa_iniziale=2)
         parti = testo_risp.replace("*", "").split('|')
         citta = parti[0].strip().upper() if len(parti) > 0 else "--"
         regione = parti[1].strip().upper() if len(parti) > 1 else "--"
         return citta, regione
-    except:
+    except Exception:
         return "--", "--"
 
 def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
-    if not serper_api_key: return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
-        
+    if not serper_api_key:
+        return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
     url = "https://google.serper.dev/search"
     azienda_pulita = pulisci_nome_azienda(nome_azienda)
     azienda_linkedin = pulisci_nome_per_linkedin(nome_azienda)
@@ -370,13 +429,17 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
             'test.it', 'pcert.it', 'arubapec.it', 'legalmail.it', 'pec.it', 'postecert.it',
             'manstar.org', 'xing.com', 'jimdoweb.com', 'webnode.it'
         }
-        if dom_estratto and dom_estratto not in provider_generici and not any(p in dom_estratto for p in ['pec', 'cert', 'legalmail', 'jimdo', 'webnode']):
+        escl_dom = ('pec', 'cert', 'legalmail', 'jimdo', 'webnode')
+        if dom_estratto and dom_estratto not in provider_generici and not any(p in dom_estratto for p in escl_dom):
             dominio_email = dom_estratto
     
     try:
         risultati = []
-        
-        q1 = f'site:linkedin.com/in "{azienda_linkedin}" (Commerciale OR Vendite OR Sales OR Direttore OR HR OR CEO OR Titolare OR Amministratore OR Socio OR Owner)'
+        q1 = (
+            f'site:linkedin.com/in "{azienda_linkedin}" '
+            f'(Commerciale OR Vendite OR Sales OR Direttore OR HR OR CEO '
+            f'OR Titolare OR Amministratore OR Socio OR Owner)'
+        )
         res1 = requests.post(url, headers=headers, data=json.dumps({"q": q1, "gl": "it", "hl": "it"}), timeout=10)
         if res1.status_code == 200:
             risultati = res1.json().get('organic', [])
@@ -388,7 +451,12 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
                 risultati = res2.json().get('organic', [])
                 
         if not risultati:
-            q3 = f'("{azienda_pulita}" OR "{dominio}") ("Direttore Commerciale" OR "Responsabile Vendite" OR "Responsabile Commerciale" OR "Amministratore Unico" OR "Amministratore Delegato" OR "Titolare" OR "CEO")'
+            q3 = (
+                f'("{azienda_pulita}" OR "{dominio}") '
+                f'("Direttore Commerciale" OR "Responsabile Vendite" OR '
+                f'"Responsabile Commerciale" OR "Amministratore Unico" OR '
+                f'"Amministratore Delegato" OR "Titolare" OR "CEO")'
+            )
             res3 = requests.post(url, headers=headers, data=json.dumps({"q": q3, "gl": "it", "hl": "it"}), timeout=10)
             if res3.status_code == 200:
                 risultati = res3.json().get('organic', [])
@@ -444,7 +512,7 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         except Exception as e_dm:
             print(f"⚠️ Errore Gemini su referente per {azienda_pulita}: {e_dm}")
             return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
-    except Exception as e:
+    except Exception:
         return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
 
 def bonifica_link_scartati(worksheet_master, dati):
@@ -463,7 +531,7 @@ def bonifica_link_scartati(worksheet_master, dati):
             modifiche_col_b.append([url_val])
             
     if conteggio_bonificati > 0:
-        print(f"🛡️ Bonifica anti-phishing: disinnesco {conteggio_bonificati} URL scartati in Foglio1...")
+        print(f"🛡️ Bonifica anti-phishing: disinnesco {conteggio_bonificati} URL scartati...")
         worksheet_master.update(values=modifiche_col_b, range_name=f"B2:B{len(dati)}")
         time.sleep(1.5)
 
@@ -485,7 +553,7 @@ def integra_referenti_mancanti(worksheet_assistente, dati_prospect):
             dominio_az = estrai_dominio(url_az)
             if any(agg in dominio_az for agg in AGGREGATORI_DA_BLOCCARE):
                 continue
-            print(f"🔄 Integrazione referente mancante per riga {num_riga_sheet}: {nome_az} ({dominio_az})")
+            print(f"🔄 Integrazione referente riga {num_riga_sheet}: {nome_az} ({dominio_az})")
             
             nome_dm, ruolo_dm, email_dm = cerca_decision_maker_osint(nome_az, dominio_az, email_az)
             
@@ -493,7 +561,10 @@ def integra_referenti_mancanti(worksheet_assistente, dati_prospect):
                 ref_completo = f"{nome_dm.upper()} {ruolo_dm.upper()}".strip()
                 email_ref_finale = email_dm if email_valida(email_dm) else ""
                 
-                worksheet_assistente.update(values=[[ref_completo, email_ref_finale]], range_name=f"G{num_riga_sheet}:H{num_riga_sheet}")
+                worksheet_assistente.update(
+                    values=[[ref_completo, email_ref_finale]],
+                    range_name=f"G{num_riga_sheet}:H{num_riga_sheet}"
+                )
                 
                 contact_id = cerca_id_hubspot_contact(dominio_az, nome_az)
                 if contact_id:
@@ -505,17 +576,24 @@ def integra_referenti_mancanti(worksheet_assistente, dati_prospect):
                 print(f"✅ Integrato con successo: {ref_completo} | {email_ref_finale}")
                 time.sleep(1.5)
             else:
-                worksheet_assistente.update(values=[["--", "NESSUNA"]], range_name=f"G{num_riga_sheet}:H{num_riga_sheet}")
+                worksheet_assistente.update(
+                    values=[["--", "NESSUNA"]],
+                    range_name=f"G{num_riga_sheet}:H{num_riga_sheet}"
+                )
                 print(f"ℹ️ Nessun profilo LinkedIn pubblico trovato per {nome_az}.")
                 time.sleep(1.0)
 
 def main():
-    URL_FOGLIO = "https://docs.google.com/spreadsheets/d/15K6_SNBTB-QBNwFB2L6Qjrd56wZ7clD3Tm9zM-MI7zc/edit?gid=0#gid=0" 
+    url_foglio = (
+        "https://docs.google.com/spreadsheets/d/"
+        "15K6_SNBTB-QBNwFB2L6Qjrd56wZ7clD3Tm9zM-MI7zc/edit?gid=0#gid=0"
+    )
     try:
-        sh = gc.open_by_url(URL_FOGLIO)
+        sh = gc.open_by_url(url_foglio)
         worksheet_master = sh.sheet1
         worksheet_assistente = sh.worksheet("Nuovi Prospect")
-    except Exception as e: return
+    except Exception:
+        return
 
     dati = worksheet_master.get_all_values()
     dati_prospect = worksheet_assistente.get_all_values()
@@ -536,7 +614,8 @@ def main():
     
     for i in range(1, len(dati)):
         riga = dati[i]
-        if len(riga) < 2: continue
+        if len(riga) < 2:
+            continue
             
         url_sito = riga[1].strip()
         esito_attuale = riga[3].strip() if len(riga) > 3 else ""
@@ -545,11 +624,222 @@ def main():
             numero_riga = i + 1
             dominio = estrai_dominio(url_sito)
             
-            # Se nella colonna B c'è solo il dominio senza https:// (es. righe svuotate a mano), ricostruisce l'URL
             if "://" not in url_sito:
                 url_sito = f"https://www.{dominio}"
             url_low = url_sito.lower()
             
-            if any(agg in dominio for agg in AGGREGATORI_DA_BLOCCARE) or any(p_agg in url_low for p_agg in PATH_AGGREGATORI_DA_BLOCCARE):
+            blocco_dom = any(agg in dominio for agg in AGGREGATORI_DA_BLOCCARE)
+            blocco_path = any(p_agg in url_low for p_agg in PATH_AGGREGATORI_DA_BLOCCARE)
+            if blocco_dom or blocco_path:
                 print(f"⏭️ Salto riga {numero_riga} ({dominio}): portale/notizie escluso.")
-                worksheet_master.update(values=[[dominio, "Portale / Directory", "ESCLUSO", data_odierna]],
+                val_escl = [[dominio, "Portale / Directory", "ESCLUSO", data_odierna]]
+                worksheet_master.update(
+                    values=val_escl,
+                    range_name=f"B{numero_riga}:E{numero_riga}"
+                )
+                time.sleep(0.8)
+                continue
+            
+            if dominio in domini_gia_in_prospect:
+                print(f"⏭️ Salto riga {numero_riga} ({dominio}): già in Nuovi Prospect.")
+                val_dup = [[dominio, "Già in Nuovi Prospect", "DUPLICATO", data_odierna]]
+                worksheet_master.update(
+                    values=val_dup,
+                    range_name=f"B{numero_riga}:E{numero_riga}"
+                )
+                time.sleep(0.8)
+                continue
+
+            print(f"🔍 Processo riga {numero_riga}: {url_sito}")
+            
+            try:
+                html_pagina = scarica_pagina_sicura(url_sito, timeout_sec=10)
+            except Exception as e_web:
+                print(f"❌ Sito non raggiungibile ({url_sito}): {e_web}")
+                val_err = [[dominio, "Sito non raggiungibile", "ERRORE", data_odierna]]
+                worksheet_master.update(
+                    values=val_err,
+                    range_name=f"B{numero_riga}:E{numero_riga}"
+                )
+                time.sleep(0.8)
+                continue
+
+            try:
+                emails_trovate = re.findall(
+                    r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',
+                    html_pagina
+                )
+                esclusioni_file = (
+                    '.png', '.jpg', '.jpeg', '.gif', '.webp',
+                    '.svg', '.js', '.css', 'sentry.io'
+                )
+                esclusioni_pec = [
+                    'pec@', '@pec', '.pec.', 'legalmail', 'postacert', 'certificata', 
+                    'sicurezzapostale', 'telecompost', '@cert.', 'pcert.it', 'arubapec',
+                    'nome@', 'esempio@', 'example@', 'test@', 'tuamail@', 'tuaemail@',
+                    '@azienda.it', '@dominio.it', '@email.it', '@esempio.it', '@example.com',
+                    '@domain.com', '@manstar.org', '@xing.com', 'jimdoweb.com', 'webnode.it'
+                ]
+                emails_pulite = list(set([
+                    e.lower() for e in emails_trovate 
+                    if not e.lower().endswith(esclusioni_file)
+                    and not any(pec in e.lower() for pec in esclusioni_pec)
+                ]))
+                email_suggerita = emails_pulite[0] if emails_pulite else "NESSUNA"
+
+                soup = BeautifulSoup(html_pagina, 'html.parser')
+                titolo = (
+                    soup.title.string.strip()
+                    if soup.title and soup.title.string
+                    else "Sito Aziendale"
+                )
+                testo = soup.get_text(separator=' ', strip=True)[:10000]
+                
+                prompt_web = f"""
+                Analizza questo testo di una pagina web per una società di ricerca e selezione agenti di commercio.
+                URL della pagina: {url_sito}
+                Dominio della pagina: {dominio}
+                Titolo pagina: {titolo}
+                
+                Estrai 7 informazioni chiave in modo sintetico:
+                
+                1. ESITO: Classifica in "AGENTE", "DIPENDENTE" oppure "ESCLUSO".
+                REGOLA TASSATIVA PER "AGENTE":
+                Scrivi "AGENTE" SOLO ED ESCLUSIVAMENTE se nella pagina (che deve appartenere al sito ufficiale di un'azienda italiana/operante in Italia) è presente un annuncio, una sezione "Lavora con noi / Collabora con noi" o un invito ESPLICITO a candidarsi / inviare il CV per diventare Agente di Commercio, Rappresentante, Venditore a P.IVA o Procacciatore.
+                
+                REGOLE DI ESCLUSIONE - Scrivi TASSATIVAMENTE "ESCLUSO" se rientra in uno di questi casi:
+                - Il dominio ({dominio}) NON è il sito web ufficiale dell'azienda che cerca agenti, ma è un portale di annunci, aggregatore, social network o directory (es. manstar.org, xing.com, kompass, atoka, empresite, siti scolastici .edu.it, ecc.).
+                - La pagina è una normale Homepage, pagina "Chi siamo", pagina "Prodotti/Servizi", "Blog/News" o "Contatti" in cui NON c'è alcuna ricerca aperta di agenti o venditori.
+                - La pagina parla di "Agenti AI" (Intelligenza Artificiale, chatbot, software AI) e non di Agenti di Commercio umani.
+                - Produttori esteri asiatici/cinesi con sito tradotto automaticamente in italiano (senza sede operativa in Italia) o multinazionali globali / società quotate in borsa (cerchiamo solo PMI e aziende italiane snelle).
+                - La pagina "Rete vendita / Punti vendita / Distributori" serve solo ai clienti finali per trovare il rivenditore o l'agente di zona, ma NON contiene un annuncio di ricerca di nuovi agenti.
+                - Vendita diretta a domicilio / incaricati alle vendite / network marketing (es. Just, Folletto, Avon, Herbalife).
+                - Portali di annunci generici, directory di aziende, blog di notizie o agenzie interinali.
+                - Agenzie immobiliari, assicurative, finanziarie, noleggio auto/NCC, scuole di recupero anni scolastici o tour operator/viaggi.
+                - Aziende contratti Luce, Gas, Energia, Telefonia.
+                - Concessionarie auto o automotive.
+                - Agenzie/studi consulenza per agenti o software CRM per agenti.
+                - Verisure o venditoriadistanza.it.
+                
+                2. NOME_AZIENDA: VERO nome del brand/azienda mandante. (Se ESCLUSO scrivi SCONOSCIUTO).
+                3. EMAIL: Indirizzo email di contatto REALE dell'azienda (NON inserire mai email finte di esempio come nome@azienda.it, né email di portali esterni come @manstar.org, né indirizzi PEC come @pcert.it o @legalmail.it. Nota: ho estratto questa email dal codice sorgente: {email_suggerita}. Usala se valida, altrimenti cercala nel testo. Se assente scrivi NESSUNA).
+                4. SETTORE: Breve specifica del settore nel quale opera l'azienda. Se non chiaro scrivi "--".
+                5. TELEFONO: Numero di telefono principale. Escludi numeri di FAX o numeri di assistenza tecnica. Se non lo trovi scrivi "--".
+                6. CITTA: La città della sede. Se non è un capoluogo di provincia, aggiungi la sigla della provincia (es. "BUSTO ARSIZIO VA"). Se non la trovi scrivi "--".
+                7. REGIONE: Lo Stato/Regione (es. Lombardia, Piemonte). Se non la trovi scrivi "--".
+                
+                Rispondi ESATTAMENTE su una sola riga usando il separatore | tra i campi.
+                Formato richiesto: ESITO | NOME_AZIENDA | EMAIL | SETTORE | TELEFONO | CITTA | REGIONE
+                
+                Testo: {testo}
+                """
+                
+                testo_risposta = chiama_gemini_con_fallback(prompt_web, pausa_iniziale=5)
+                parti = testo_risposta.replace("*", "").split('|')
+                
+                esito = parti[0].strip().upper() if len(parti) > 0 else "SCONOSCIUTO"
+                nome_reale = parti[1].strip() if len(parti) > 1 else "SCONOSCIUTO"
+                email = parti[2].strip().lower() if len(parti) > 2 else "NESSUNA"
+                if not email_valida(email):
+                    email = "NESSUNA"
+                settore = parti[3].strip() if len(parti) > 3 else "--"
+                
+                telefono_sito = parti[4].strip() if len(parti) > 4 else "--"
+                citta_sito = parti[5].strip() if len(parti) > 5 else "--"
+                regione_sito = parti[6].strip() if len(parti) > 6 else "--"
+                
+                if "AGENTE" not in esito:
+                    val_no_ag = [[dominio, titolo, esito, data_odierna]]
+                    worksheet_master.update(
+                        values=val_no_ag,
+                        range_name=f"B{numero_riga}:E{numero_riga}"
+                    )
+                    print(f"   ✔️ Riga {numero_riga} classificata: {esito} ({dominio})")
+                else:
+                    val_si_ag = [[titolo, esito, data_odierna]]
+                    worksheet_master.update(
+                        values=val_si_ag,
+                        range_name=f"C{numero_riga}:E{numero_riga}"
+                    )
+                    print(f"   🎯 Riga {numero_riga} classificata: AGENTE -> {nome_reale}")
+                time.sleep(0.8)
+                
+                if "AGENTE" in esito:
+                    nome_pulito = pulisci_nome_azienda(nome_reale)
+                    
+                    gia_pres = (
+                        (nome_pulito and nome_pulito in aziende_gia_in_prospect)
+                        or (dominio in domini_gia_in_prospect)
+                    )
+                    if gia_pres:
+                        print(f"   ⏭️ Salto {nome_reale}: già in Nuovi Prospect.")
+                        continue
+
+                    nome_dm, ruolo_dm, email_dm = cerca_decision_maker_osint(
+                        nome_reale, dominio, email
+                    )
+                    tel_google, ind_google = cerca_dati_aziendali_osint(nome_reale)
+                    telefono_finale = tel_google if tel_google else telefono_sito
+                    
+                    citta_finale = citta_sito
+                    regione_finale = regione_sito
+                    if ind_google:
+                        citta_g, reg_g = formatta_indirizzo_osint(ind_google)
+                        if citta_g != "--":
+                            citta_finale = citta_g
+                        if reg_g != "--":
+                            regione_finale = reg_g
+                    
+                    contact_id_esistente = cerca_id_hubspot_contact(dominio, nome_reale)
+                    if contact_id_esistente:
+                        stato_crm = arricchisci_contatto_hubspot_esistente(
+                            contact_id_esistente,
+                            url_sito=url_sito,
+                            email_generica=email,
+                            nome_dm=nome_dm,
+                            ruolo_dm=ruolo_dm,
+                            email_dm=email_dm,
+                            settore=settore,
+                            telefono=telefono_finale,
+                            citta=citta_finale,
+                            regione=regione_finale
+                        )
+                    else:
+                        stato_crm = crea_hubspot_contact(
+                            nome_reale, url_sito, email, nome_dm, ruolo_dm, email_dm, 
+                            settore, telefono_finale, citta_finale, regione_finale
+                        )
+                        
+                    referente_completo = (
+                        f"{nome_dm.upper()} {ruolo_dm.upper()}".strip()
+                        if nome_dm != "SCONOSCIUTO" else "--"
+                    )
+                    email_referente_finale = email_dm if email_valida(email_dm) else "NESSUNA"
+                    email_azienda_finale = email if email_valida(email) else ""
+                    
+                    nuova_riga = [
+                        nome_reale.upper(),
+                        url_sito,
+                        titolo,
+                        esito,
+                        stato_crm,
+                        email_azienda_finale,
+                        referente_completo,
+                        email_referente_finale,
+                        data_odierna
+                    ]
+                    worksheet_assistente.append_row(nuova_riga)
+                    
+                    if nome_pulito:
+                        aziende_gia_in_prospect.add(nome_pulito)
+                    domini_gia_in_prospect.add(dominio)
+                
+            except Exception as e_ia:
+                print(
+                    f"⚠️ Errore IA su riga {numero_riga} ({url_sito}): {e_ia}. "
+                    f"Riga lasciata in coda."
+                )
+                time.sleep(3)
+
+if __name__ == "__main__":
+    main()
