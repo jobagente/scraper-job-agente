@@ -33,7 +33,7 @@ HEADERS_BROWSER = {
     'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7'
 }
 
-MODELLI_GEMINI = ['gemini-2.5-flash', 'gemini-2.0-flash']
+MODELLI_GEMINI = ['gemini-3.8-flash', 'gemini-2.5-flash']
 
 AGGREGATORI_DA_BLOCCARE = (
     'manstar', 'kompass', 'europages', 'informazione-aziende', 'ufficiocamerale',
