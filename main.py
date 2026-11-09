@@ -33,17 +33,41 @@ HEADERS_BROWSER = {
     'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7'
 }
 
+MODELLI_GEMINI = ['gemini-2.5-flash', 'gemini-3.6-flash', 'gemini-2.0-flash']
+
 AGGREGATORI_DA_BLOCCARE = (
     'manstar', 'kompass', 'europages', 'informazione-aziende', 'ufficiocamerale',
     'fatturatoitalia', 'signalhire', 'rocketreach', 'zoominfo', 'dnb.com',
     'crunchbase', 'atoka.io', 'empresite', 'gowork.it', 'casagenti.it',
     'xing.com', 'academia.edu', '.edu.it', '.gov.it', 'lavoraconnoi.com',
-    'gazzettadellavoro.com', 'globelife.com', '360forma.com'
+    'gazzettadellavoro.com', 'globelife.com', '360forma.com', 'jimdoweb.com',
+    'webnode.it', 'tutto626.it', 'claude.com', 'job4italy.com', 'trendsrl.net',
+    'profili.it', 'gesacom.it'
 )
 
 PATH_AGGREGATORI_DA_BLOCCARE = (
     '/companies/', '/company/', '/aziende/', '/azienda/', '/directory/', '/profile/'
 )
+
+def chiama_gemini_con_fallback(prompt, pausa_iniziale=5):
+    """Chiama Gemini provando in sequenza i modelli disponibili per evitare blocchi da quota o modello deprecato."""
+    if pausa_iniziale > 0:
+        time.sleep(pausa_iniziale)
+    ultimo_errore = None
+    for modello in MODELLI_GEMINI:
+        for tentativo in range(2):
+            try:
+                risp = client.models.generate_content(model=modello, contents=prompt)
+                if risp and risp.text:
+                    return risp.text.strip()
+            except Exception as e:
+                ultimo_errore = e
+                errore_str = str(e).lower()
+                # Se il modello non esiste (404 / not found), passa subito al modello successivo
+                if '404' in errore_str or 'not found' in errore_str or 'not supported' in errore_str:
+                    break
+                time.sleep(12)
+    raise RuntimeError(f"Tutti i modelli Gemini hanno fallito. Ultimo errore: {ultimo_errore}")
 
 def pulisci_nome_azienda(nome):
     if not nome: return ""
@@ -74,7 +98,7 @@ def email_valida(e):
         'sicurezzapostale', 'telecompost', '@cert.', 'pcert.it', 'arubapec',
         'nome@', 'esempio@', 'example@', 'test@', 'tuamail@', 'tuaemail@',
         '@azienda.it', '@dominio.it', '@email.it', '@esempio.it', '@example.com',
-        '@domain.com', '@manstar.org', '@xing.com'
+        '@domain.com', '@manstar.org', '@xing.com', 'jimdoweb.com', 'webnode.it'
     ]
     return not any(fp in e_low for fp in falsi_positivi)
 
@@ -161,12 +185,10 @@ def arricchisci_contatto_hubspot_esistente(contact_id, url_sito=None, email_gene
     for e_cand in nuove_email_da_valutare:
         if e_cand not in tutte_esistenti:
             if not email_attuale:
-                # Il contatto su HubSpot era completamente privo di email primaria
                 email_attuale = e_cand
                 aggiornamenti["email"] = e_cand
                 tutte_esistenti.add(e_cand)
             else:
-                # C'è già un'email primaria: aggiunge la nuova tra le email secondarie
                 lista_add.append(e_cand)
                 tutte_esistenti.add(e_cand)
 
@@ -192,7 +214,6 @@ def arricchisci_contatto_hubspot_esistente(contact_id, url_sito=None, email_gene
             if res_patch.status_code == 200:
                 return "Già in HubSpot (Arricchito)"
             elif "hs_additional_emails" in aggiornamenti:
-                # Se una delle email aggiuntive appartiene già a un'altra scheda in HubSpot, salva comunque referente e telefono
                 del aggiornamenti["hs_additional_emails"]
                 if aggiornamenti:
                     requests.patch(url_patch, headers=headers, json={"properties": aggiornamenti}, timeout=15)
@@ -240,7 +261,6 @@ def crea_hubspot_contact(nome_azienda, url_sito, email_generica, nome_dm, ruolo_
             return "Inserito in HubSpot"
         else:
             errore = res.json().get("message", "Errore sconosciuto")
-            # Se l'email esiste già su HubSpot (es. Existing ID: ...), recupera l'ID e arricchisce la scheda senza sovrascrivere!
             match_id = re.search(r'Existing ID:\s*(\d+)', errore)
             if match_id:
                 existing_id = match_id.group(1)
@@ -306,9 +326,8 @@ def formatta_indirizzo_osint(indirizzo):
     if not indirizzo: return "--", "--"
     prompt = f"Estrai Città (con sigla provincia se non è capoluogo) e Regione da questo indirizzo: '{indirizzo}'.\nRispondi ESATTAMENTE su una sola riga nel formato: CITTA | REGIONE\nSe manca un dato scrivi --."
     try:
-        time.sleep(3)
-        risposta = client.models.generate_content(model='gemini-3.6-flash', contents=prompt)
-        parti = risposta.text.strip().replace("*", "").split('|')
+        testo_risp = chiama_gemini_con_fallback(prompt, pausa_iniziale=3)
+        parti = testo_risp.replace("*", "").split('|')
         citta = parti[0].strip().upper() if len(parti) > 0 else "--"
         regione = parti[1].strip().upper() if len(parti) > 1 else "--"
         return citta, regione
@@ -332,9 +351,9 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
             'hotmail.com', 'hotmail.it', 'outlook.com', 'outlook.it', 'yahoo.com', 'yahoo.it', 
             'icloud.com', 'email.it', 'azienda.it', 'dominio.it', 'esempio.it', 'example.com', 
             'test.it', 'pcert.it', 'arubapec.it', 'legalmail.it', 'pec.it', 'postecert.it',
-            'manstar.org', 'xing.com'
+            'manstar.org', 'xing.com', 'jimdoweb.com', 'webnode.it'
         }
-        if dom_estratto and dom_estratto not in provider_generici and not any(p in dom_estratto for p in ['pec', 'cert', 'legalmail']):
+        if dom_estratto and dom_estratto not in provider_generici and not any(p in dom_estratto for p in ['pec', 'cert', 'legalmail', 'jimdo', 'webnode']):
             dominio_email = dom_estratto
     
     try:
@@ -346,14 +365,14 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         if res1.status_code == 200:
             risultati = res1.json().get('organic', [])
             
-        # LIVELLO 2: Ricerca più ampia su LinkedIn per nome base o dominio (es. "cigiservice" o "rrmgroup")
+        # LIVELLO 2: Ricerca più ampia su LinkedIn per nome base o dominio
         if not risultati:
             q2 = f'site:linkedin.com/in ("{azienda_linkedin}" OR "{radice_dominio}" OR "{dominio}")'
             res2 = requests.post(url, headers=headers, data=json.dumps({"q": q2, "gl": "it", "hl": "it"}), timeout=15)
             if res2.status_code == 200:
                 risultati = res2.json().get('organic', [])
                 
-        # LIVELLO 3: Se l'azienda è una PMI non presente su LinkedIn, cerca sul web pubblico (sito aziendale / dati camerali)
+        # LIVELLO 3: Se l'azienda è una PMI non presente su LinkedIn, cerca sul web pubblico
         if not risultati:
             q3 = f'("{azienda_pulita}" OR "{dominio}") ("Direttore Commerciale" OR "Responsabile Vendite" OR "Responsabile Commerciale" OR "Amministratore Unico" OR "Amministratore Delegato" OR "Titolare" OR "CEO")'
             res3 = requests.post(url, headers=headers, data=json.dumps({"q": q3, "gl": "it", "hl": "it"}), timeout=15)
@@ -395,27 +414,22 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         {testo_risultati}
         """
         
-        time.sleep(5)
-        for tentativo in range(2):
-            try:
-                risposta = client.models.generate_content(model='gemini-3.6-flash', contents=prompt)
-                testo_pulito = risposta.text.strip().replace("*", "").replace("Nome:", "").replace("Ruolo:", "").replace("Email:", "")
-                parti = testo_pulito.split('|')
+        try:
+            testo_risp = chiama_gemini_con_fallback(prompt, pausa_iniziale=4)
+            testo_pulito = testo_risp.replace("*", "").replace("Nome:", "").replace("Ruolo:", "").replace("Email:", "")
+            parti = testo_pulito.split('|')
+            
+            nome_dm = parti[0].strip() if len(parti) > 0 else "SCONOSCIUTO"
+            ruolo_dm = parti[1].strip() if len(parti) > 1 else "NESSUNO"
+            email_dm = parti[2].strip().lower() if len(parti) > 2 else "NESSUNA"
+            
+            if "SCONOSCIUTO" in nome_dm.upper() or len(nome_dm) < 3 or " " not in nome_dm:
+                return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
                 
-                nome_dm = parti[0].strip() if len(parti) > 0 else "SCONOSCIUTO"
-                ruolo_dm = parti[1].strip() if len(parti) > 1 else "NESSUNO"
-                email_dm = parti[2].strip().lower() if len(parti) > 2 else "NESSUNA"
-                
-                if "SCONOSCIUTO" in nome_dm.upper() or len(nome_dm) < 3 or " " not in nome_dm:
-                    return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
-                    
-                return nome_dm, ruolo_dm, email_dm
-            except Exception as e_dm:
-                if tentativo == 0:
-                    time.sleep(15)
-                else:
-                    print(f"⚠️ Errore Gemini su referente per {azienda_pulita}: {e_dm}")
-        return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
+            return nome_dm, ruolo_dm, email_dm
+        except Exception as e_dm:
+            print(f"⚠️ Errore Gemini su referente per {azienda_pulita}: {e_dm}")
+            return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
     except Exception as e:
         return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
 
@@ -529,7 +543,7 @@ def main():
             dominio = estrai_dominio(url_sito)
             url_low = url_sito.lower()
             
-            # Blocco preventivo immediato se l'URL appartiene a un aggregatore, social o ente scolastico (es. manstar.org, xing.com, .edu.it)
+            # Blocco preventivo immediato se l'URL appartiene a un aggregatore, social o costruttore gratuito
             if any(agg in dominio for agg in AGGREGATORI_DA_BLOCCARE) or any(p_agg in url_low for p_agg in PATH_AGGREGATORI_DA_BLOCCARE):
                 print(f"Salto riga {numero_riga} ({dominio}): portale aggregatore/directory o social escluso.")
                 worksheet_master.update(values=[[dominio, "Portale / Directory", "ESCLUSO", data_odierna]], range_name=f"B{numero_riga}:E{numero_riga}")
@@ -544,10 +558,18 @@ def main():
 
             print(f"Processo riga {numero_riga}: {url_sito}")
             
+            # 3A. Scaricamento pagina web (se fallisce qui, il sito è davvero irraggiungibile)
             try:
                 res_web = requests.get(url_sito, headers=HEADERS_BROWSER, timeout=15, verify=False)
                 res_web.raise_for_status()
-                
+            except Exception as e_web:
+                print(f"❌ Sito non raggiungibile ({url_sito}): {e_web}")
+                worksheet_master.update(values=[[dominio, "Sito non raggiungibile", "ERRORE", data_odierna]], range_name=f"B{numero_riga}:E{numero_riga}")
+                time.sleep(1.5)
+                continue
+
+            # 3B. Analisi IA e integrazione CRM (se Gemini ha un problema temporaneo, NON brucia la riga!)
+            try:
                 emails_trovate = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', res_web.text)
                 
                 esclusioni_file = ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.js', '.css', 'sentry.io')
@@ -556,7 +578,7 @@ def main():
                     'sicurezzapostale', 'telecompost', '@cert.', 'pcert.it', 'arubapec',
                     'nome@', 'esempio@', 'example@', 'test@', 'tuamail@', 'tuaemail@',
                     '@azienda.it', '@dominio.it', '@email.it', '@esempio.it', '@example.com',
-                    '@domain.com', '@manstar.org', '@xing.com'
+                    '@domain.com', '@manstar.org', '@xing.com', 'jimdoweb.com', 'webnode.it'
                 ]
                 
                 emails_pulite = list(set([
@@ -610,29 +632,19 @@ def main():
                 Testo: {testo}
                 """
                 
-                time.sleep(20)
-                max_tentativi = 3
-                for t in range(max_tentativi):
-                    try:
-                        risposta = client.models.generate_content(model='gemini-3.6-flash', contents=prompt_web)
-                        
-                        parti = risposta.text.strip().replace("*", "").split('|')
-                        
-                        esito = parti[0].strip().upper() if len(parti) > 0 else "SCONOSCIUTO"
-                        nome_reale = parti[1].strip() if len(parti) > 1 else "SCONOSCIUTO"
-                        email = parti[2].strip().lower() if len(parti) > 2 else "NESSUNA"
-                        if not email_valida(email):
-                            email = "NESSUNA"
-                        settore = parti[3].strip() if len(parti) > 3 else "--"
-                        
-                        telefono_sito = parti[4].strip() if len(parti) > 4 else "--"
-                        citta_sito = parti[5].strip() if len(parti) > 5 else "--"
-                        regione_sito = parti[6].strip() if len(parti) > 6 else "--"
-                        
-                        break 
-                    except Exception as e_ia:
-                        if t < max_tentativi - 1: time.sleep(30)
-                        else: raise e_ia
+                testo_risposta = chiama_gemini_con_fallback(prompt_web, pausa_iniziale=15)
+                parti = testo_risposta.replace("*", "").split('|')
+                
+                esito = parti[0].strip().upper() if len(parti) > 0 else "SCONOSCIUTO"
+                nome_reale = parti[1].strip() if len(parti) > 1 else "SCONOSCIUTO"
+                email = parti[2].strip().lower() if len(parti) > 2 else "NESSUNA"
+                if not email_valida(email):
+                    email = "NESSUNA"
+                settore = parti[3].strip() if len(parti) > 3 else "--"
+                
+                telefono_sito = parti[4].strip() if len(parti) > 4 else "--"
+                citta_sito = parti[5].strip() if len(parti) > 5 else "--"
+                regione_sito = parti[6].strip() if len(parti) > 6 else "--"
                 
                 if "AGENTE" not in esito:
                     worksheet_master.update(values=[[dominio, titolo, esito, data_odierna]], range_name=f"B{numero_riga}:E{numero_riga}")
@@ -660,7 +672,6 @@ def main():
                         if citta_g != "--": citta_finale = citta_g
                         if reg_g != "--": regione_finale = reg_g
                     
-                    # Controlla se il contatto esiste già su HubSpot: se esiste, aggiunge i nuovi dati senza cancellare i vecchi
                     contact_id_esistente = cerca_id_hubspot_contact(dominio, nome_reale)
                     if contact_id_esistente:
                         stato_crm = arricchisci_contatto_hubspot_esistente(
@@ -702,9 +713,9 @@ def main():
                         aziende_gia_in_prospect.add(nome_pulito)
                     domini_gia_in_prospect.add(dominio)
                 
-            except Exception as e:
-                worksheet_master.update(values=[[dominio, "Sito non raggiungibile", "ERRORE", data_odierna]], range_name=f"B{numero_riga}:E{numero_riga}")
-                time.sleep(1.5)
+            except Exception as e_ia:
+                print(f"⚠️ Errore IA/Elaborazione su riga {numero_riga} ({url_sito}): {e_ia}. Riga lasciata in coda per il prossimo avvio.")
+                time.sleep(5)
 
 if __name__ == "__main__":
     main()
