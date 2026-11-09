@@ -42,7 +42,8 @@ AGGREGATORI_DA_BLOCCARE = (
     'xing.com', 'academia.edu', '.edu.it', '.gov.it', 'lavoraconnoi.com',
     'gazzettadellavoro.com', 'globelife.com', '360forma.com', 'jimdoweb.com',
     'webnode.it', 'tutto626.it', 'claude.com', 'job4italy.com', 'trendsrl.net',
-    'profili.it', 'gesacom.it'
+    'profili.it', 'gesacom.it', 'made-in-china.com', 'alibaba.com',
+    'agriaffaires.', 'machineryzone.', 'noleggiamoauto.it'
 )
 
 PATH_AGGREGATORI_DA_BLOCCARE = (
