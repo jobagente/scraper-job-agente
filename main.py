@@ -17,7 +17,7 @@ sys.stdout.reconfigure(line_buffering=True)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 creds_json = os.environ.get('GCP_CREDENTIALS')
-gemini_api_key = os.environ.get('GEMINI_API_KEY')
+gemini_keys_raw = os.environ.get('GEMINI_API_KEY', '')
 hubspot_token = os.environ.get('HUBSPOT_ACCESS_TOKEN')
 serper_api_key = os.environ.get('SERPER_API_KEY')
 
@@ -29,10 +29,53 @@ scopes = [
 creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
 gc = gspread.authorize(creds)
 
-client = genai.Client(
-    api_key=gemini_api_key,
-    http_options=types.HttpOptions(timeout=60000)
-)
+# Legge da 1 a N chiavi API (separate da virgola, punto e virgola o a capo nel Secret GEMINI_API_KEY)
+LISTA_CHIAVI = [
+    k.strip() for k in re.split(r'[,;\s\n]+', gemini_keys_raw) if k.strip()
+]
+
+# Raccoglie anche eventuali secret aggiuntivi GEMINI_API_KEY_2, GEMINI_API_KEY_3, GEMINI_API_KEY_4
+for idx_k in range(2, 10):
+    extra_k = (os.environ.get(f'GEMINI_API_KEY_{idx_k}') or '').strip()
+    if extra_k and extra_k not in LISTA_CHIAVI:
+        LISTA_CHIAVI.append(extra_k)
+
+CLIENTS_POOL = []
+for idx, k in enumerate(LISTA_CHIAVI, start=1):
+    try:
+        c = genai.Client(
+            api_key=k,
+            http_options=types.HttpOptions(timeout=60000)
+        )
+        CLIENTS_POOL.append({
+            "id": f"Chiave #{idx} (...{k[-4:]})",
+            "client": c,
+            "modelli": ['gemini-3.8-flash']
+        })
+    except Exception as e_cl:
+        print(f"⚠️ Errore inizializzazione Chiave #{idx}: {e_cl}")
+
+# Rileva per ciascuna chiave eventuali modelli secondari attivi (es. flash-lite)
+if CLIENTS_POOL:
+    try:
+        modelli_extra = []
+        for m in CLIENTS_POOL[0]["client"].models.list():
+            nome = m.name.replace('models/', '')
+            escludi = (
+                'vision', 'embedding', 'imagen', 'veo', 'audio',
+                'tts', 'aqa', 'bisect', '2.0', '1.5', '2.5'
+            )
+            if 'gemini-' in nome and not any(x in nome for x in escludi):
+                if nome not in modelli_extra and nome != 'gemini-3.8-flash':
+                    modelli_extra.append(nome)
+        for item in CLIENTS_POOL:
+            item["modelli"].extend(modelli_extra)
+    except Exception:
+        pass
+
+print(f"🔑 Chiavi Gemini caricate nel pool a rotazione: {len(CLIENTS_POOL)}")
+for item in CLIENTS_POOL:
+    print(f"   - {item['id']} -> Modelli: {item['modelli']}")
 
 HEADERS_BROWSER = {
     'User-Agent': (
@@ -43,20 +86,6 @@ HEADERS_BROWSER = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7'
 }
-
-# Rileva automaticamente tutti i modelli di testo attivi sulla chiave per sommare le quote giornaliere
-MODELLI_ATTIVI = ['gemini-3.8-flash']
-try:
-    for m in client.models.list():
-        nome = m.name.replace('models/', '')
-         Metodi = getattr(m, 'supported_actions', []) or []
-        escludi = ('vision', 'embedding', 'imagen', 'veo', 'audio', 'tts', 'aqa', 'bisect', '2.0', '1.5', '2.5')
-        if 'gemini-' in nome and not any(x in nome for x in escludi):
-            if nome not in MODELLI_ATTIVI:
-                MODELLI_ATTIVI.append(nome)
-    print(f"🤖 Pool modelli attivi per moltiplicare la quota: {MODELLI_ATTIVI}")
-except Exception as e_list:
-    print(f"ℹ️ Uso modello predefinito: {MODELLI_ATTIVI}")
 
 AGGREGATORI_DA_BLOCCARE = (
     'manstar', 'kompass', 'europages', 'informazione-aziende', 'ufficiocamerale',
@@ -76,12 +105,16 @@ PATH_AGGREGATORI_DA_BLOCCARE = (
     '/companies/', '/company/', '/aziende/', '/azienda/', '/directory/', '/profile/'
 )
 
-# Parole chiave minime: se una pagina web non ne contiene nemmeno una, viene scartata senza sprecare chiamate Gemini
 PAROLE_CHIAVE_AGENTE = (
     'agent', 'rappresentant', 'vendit', 'commercial', 'enasarco',
     'plurimandat', 'monomandat', 'procacciat', 'lavora con noi',
     'collabora', 'candidat', 'curriculum', 'posizioni aperte', 'carriere', 'sales'
 )
+
+INDICE_CHIAVE_CORRENTE = 0
+
+def ha_capacita_gemini():
+    return any(len(item["modelli"]) > 0 for item in CLIENTS_POOL)
 
 def scarica_pagina_sicura(url_sito, timeout_sec=10):
     with requests.get(
@@ -105,61 +138,74 @@ def scarica_pagina_sicura(url_sito, timeout_sec=10):
         encoding = r.encoding or 'utf-8'
         return raw_bytes.decode(encoding, errors='replace')
 
-def chiama_gemini_con_fallback(prompt, pausa_iniziale=5):
-    if not MODELLI_ATTIVI:
-        raise RuntimeError("Quota giornaliera esaurita su tutti i modelli disponibili.")
+def chiama_gemini_con_fallback(prompt, pausa_iniziale=4):
+    global INDICE_CHIAVE_CORRENTE
+    if not ha_capacita_gemini():
+        raise RuntimeError("Tutte le chiavi API hanno esaurito la quota giornaliera.")
     if pausa_iniziale > 0:
         time.sleep(pausa_iniziale)
+
     ultimo_errore = None
     cfg_veloce = types.GenerateContentConfig(
         thinking_config=types.ThinkingConfig(thinking_budget=0),
         temperature=0.1
     )
-    for tentativo in range(1, 4):
-        for mod in list(MODELLI_ATTIVI):
-            try:
+
+    tot_chiavi = len(CLIENTS_POOL)
+    for giro in range(1, 4):
+        for offset in range(tot_chiavi):
+            idx = (INDICE_CHIAVE_CORRENTE + offset) % tot_chiavi
+            slot = CLIENTS_POOL[idx]
+            if not slot["modelli"]:
+                continue
+
+            client_attivo = slot["client"]
+            id_chiave = slot["id"]
+
+            for mod in list(slot["modelli"]):
                 try:
-                    risp = client.models.generate_content(
-                        model=mod,
-                        contents=prompt,
-                        config=cfg_veloce
-                    )
-                except Exception as e_cfg:
-                    if 'thinking' in str(e_cfg).lower() or '400' in str(e_cfg):
-                        risp = client.models.generate_content(
+                    try:
+                        risp = client_attivo.models.generate_content(
                             model=mod,
-                            contents=prompt
+                            contents=prompt,
+                            config=cfg_veloce
                         )
-                    else:
-                        raise e_cfg
-                if risp and risp.text:
-                    return risp.text.strip()
-            except Exception as e:
-                ultimo_errore = e
-                err_str = str(e).lower()
-                # Se il modello non esiste o non supporta generate_content, rimuovilo
-                if '404' in err_str or 'not found' in err_str or 'not supported' in err_str:
-                    if mod in MODELLI_ATTIVI:
-                        MODELLI_ATTIVI.remove(mod)
-                    continue
-                # Se ha esaurito la quota GIORNALIERA (per day), passa subito al prossimo modello!
-                if 'per day' in err_str or 'per_day' in err_str or 'daily' in err_str:
-                    print(f"   ⚠️ Quota giornaliera (20/giorno) esaurita per {mod}. Passo al modello successivo...")
-                    if mod in MODELLI_ATTIVI:
-                        MODELLI_ATTIVI.remove(mod)
-                    continue
-                # Se è solo limite al minuto (RPM), attendi 20s e riprova
-                if any(k in err_str for k in ('429', 'quota', 'exhausted', 'rate')):
-                    print(f"   ⏳ Limite al minuto su {mod}. Attendo 20s...")
-                    time.sleep(20)
-                    continue
-                if any(k in err_str for k in ('503', '504', 'deadline', 'unavailable', 'overloaded')):
-                    print(f"   ⏳ Server {mod} occupato ({tentativo}/3). Provo alternativa o attendo 12s...")
-                    time.sleep(12)
-                    continue
-        if not MODELLI_ATTIVI:
+                    except Exception as e_cfg:
+                        if 'thinking' in str(e_cfg).lower() or '400' in str(e_cfg):
+                            risp = client_attivo.models.generate_content(
+                                model=mod,
+                                contents=prompt
+                            )
+                        else:
+                            raise e_cfg
+                    if risp and risp.text:
+                        INDICE_CHIAVE_CORRENTE = (idx + 1) % tot_chiavi
+                        return risp.text.strip()
+                except Exception as e:
+                    ultimo_errore = e
+                    err_str = str(e).lower()
+                    if any(x in err_str for x in ('404', 'not found', 'not supported', 'invalid argument')):
+                        if mod in slot["modelli"]:
+                            slot["modelli"].remove(mod)
+                        continue
+                    if any(x in err_str for x in ('per day', 'per_day', 'daily', 'requests per day')):
+                        print(f"   🔄 {id_chiave} ha esaurito le 20 chiamate/giorno su {mod}. Ruoto su chiave/modello successivo...")
+                        if mod in slot["modelli"]:
+                            slot["modelli"].remove(mod)
+                        continue
+                    if any(x in err_str for x in ('429', 'quota', 'exhausted', 'rate')):
+                        print(f"   ⏳ Limite al minuto su {id_chiave} ({mod}). Passo subito alla chiave successiva...")
+                        break
+                    if any(x in err_str for x in ('503', '504', 'deadline', 'unavailable', 'overloaded')):
+                        print(f"   ⏳ Server occupato su {id_chiave} ({mod}). Ruoto chiave...")
+                        break
+        if not ha_capacita_gemini():
             break
-    raise RuntimeError(f"Impossibile completare la richiesta Gemini: {ultimo_errore}")
+        attesa = 10 * giro
+        print(f"   ⏳ Tutte le chiavi sono temporaneamente in pausa ({giro}/3). Attendo {attesa}s...")
+        time.sleep(attesa)
+
+    raise RuntimeError(f"Impossibile completare la richiesta Gemini su nessuna chiave: {ultimo_errore}")
 
 def pulisci_nome_azienda(nome):
     if not nome:
@@ -594,7 +640,7 @@ def integra_referenti_mancanti(worksheet_assistente, dati_prospect):
     inizio_controllo = max(1, tot_righe - 20)
     
     for idx in range(inizio_controllo, tot_righe):
-        if not MODELLI_ATTIVI:
+        if not ha_capacita_gemini():
             break
         riga_p = dati_prospect[idx]
         num_riga_sheet = idx + 1
@@ -668,8 +714,8 @@ def main():
                 domini_gia_in_prospect.add(dom_p)
     
     for i in range(1, len(dati)):
-        if not MODELLI_ATTIVI:
-            print("🛑 Tutte le quote giornaliere gratuite dei modelli sono state consumate. Riprenderà al prossimo reset!")
+        if not ha_capacita_gemini():
+            print("🛑 Tutte le chiavi API hanno esaurito la quota giornaliera. Riprenderà al prossimo reset!")
             break
 
         riga = dati[i]
@@ -735,7 +781,6 @@ def main():
                 testo = soup.get_text(separator=' ', strip=True)[:4500]
                 testo_check = f"{titolo} {url_sito} {testo}".lower()
 
-                # PRE-FILTRO A COSTO ZERO: se non c'è nemmeno una parola legata a lavoro/vendita/agenti, esclude senza consumare chiamate Gemini!
                 if not any(kw in testo_check for kw in PAROLE_CHIAVE_AGENTE):
                     val_no_kw = [[dominio, titolo[:100], "ESCLUSO", data_odierna]]
                     worksheet_master.update(
@@ -807,7 +852,7 @@ def main():
                 Testo: {testo}
                 """
                 
-                testo_risposta = chiama_gemini_con_fallback(prompt_web, pausa_iniziale=5)
+                testo_risposta = chiama_gemini_con_fallback(prompt_web, pausa_iniziale=3)
                 parti = testo_risposta.replace("*", "").split('|')
                 
                 esito = parti[0].strip().upper() if len(parti) > 0 else "SCONOSCIUTO"
