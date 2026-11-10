@@ -29,7 +29,6 @@ scopes = [
 creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
 gc = gspread.authorize(creds)
 
-# Timeout esteso a 60 secondi (60000 ms) contro i picchi di carico Google
 client = genai.Client(
     api_key=gemini_api_key,
     http_options=types.HttpOptions(timeout=60000)
@@ -45,7 +44,19 @@ HEADERS_BROWSER = {
     'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7'
 }
 
-MODELLO_ATTIVO = 'gemini-3.8-flash'
+# Rileva automaticamente tutti i modelli di testo attivi sulla chiave per sommare le quote giornaliere
+MODELLI_ATTIVI = ['gemini-3.8-flash']
+try:
+    for m in client.models.list():
+        nome = m.name.replace('models/', '')
+         Metodi = getattr(m, 'supported_actions', []) or []
+        escludi = ('vision', 'embedding', 'imagen', 'veo', 'audio', 'tts', 'aqa', 'bisect', '2.0', '1.5', '2.5')
+        if 'gemini-' in nome and not any(x in nome for x in escludi):
+            if nome not in MODELLI_ATTIVI:
+                MODELLI_ATTIVI.append(nome)
+    print(f"🤖 Pool modelli attivi per moltiplicare la quota: {MODELLI_ATTIVI}")
+except Exception as e_list:
+    print(f"ℹ️ Uso modello predefinito: {MODELLI_ATTIVI}")
 
 AGGREGATORI_DA_BLOCCARE = (
     'manstar', 'kompass', 'europages', 'informazione-aziende', 'ufficiocamerale',
@@ -57,11 +68,19 @@ AGGREGATORI_DA_BLOCCARE = (
     'profili.it', 'gesacom.it', 'made-in-china.com', 'alibaba.com',
     'agriaffaires.', 'machineryzone.', 'noleggiamoauto.it', 'senato.it',
     'virgilio.it', 'leggo.it', 'mattinopadova.it', 'elledecor.com', 'github.com',
-    'infobel.com', 'openedition.org', 'legambiente.it', 'ny.gov'
+    'infobel.com', 'openedition.org', 'legambiente.it', 'ny.gov', 'unito.it',
+    'agent321.', 'freshplaza.it', 'ricercaimprese.com'
 )
 
 PATH_AGGREGATORI_DA_BLOCCARE = (
     '/companies/', '/company/', '/aziende/', '/azienda/', '/directory/', '/profile/'
+)
+
+# Parole chiave minime: se una pagina web non ne contiene nemmeno una, viene scartata senza sprecare chiamate Gemini
+PAROLE_CHIAVE_AGENTE = (
+    'agent', 'rappresentant', 'vendit', 'commercial', 'enasarco',
+    'plurimandat', 'monomandat', 'procacciat', 'lavora con noi',
+    'collabora', 'candidat', 'curriculum', 'posizioni aperte', 'carriere', 'sales'
 )
 
 def scarica_pagina_sicura(url_sito, timeout_sec=10):
@@ -87,6 +106,8 @@ def scarica_pagina_sicura(url_sito, timeout_sec=10):
         return raw_bytes.decode(encoding, errors='replace')
 
 def chiama_gemini_con_fallback(prompt, pausa_iniziale=5):
+    if not MODELLI_ATTIVI:
+        raise RuntimeError("Quota giornaliera esaurita su tutti i modelli disponibili.")
     if pausa_iniziale > 0:
         time.sleep(pausa_iniziale)
     ultimo_errore = None
@@ -94,38 +115,51 @@ def chiama_gemini_con_fallback(prompt, pausa_iniziale=5):
         thinking_config=types.ThinkingConfig(thinking_budget=0),
         temperature=0.1
     )
-    for tentativo in range(1, 5):
-        try:
+    for tentativo in range(1, 4):
+        for mod in list(MODELLI_ATTIVI):
             try:
-                risp = client.models.generate_content(
-                    model=MODELLO_ATTIVO,
-                    contents=prompt,
-                    config=cfg_veloce
-                )
-            except Exception as e_cfg:
-                if 'thinking' in str(e_cfg).lower() or '400' in str(e_cfg):
+                try:
                     risp = client.models.generate_content(
-                        model=MODELLO_ATTIVO,
-                        contents=prompt
+                        model=mod,
+                        contents=prompt,
+                        config=cfg_veloce
                     )
-                else:
-                    raise e_cfg
-            if risp and risp.text:
-                return risp.text.strip()
-        except Exception as e:
-            ultimo_errore = e
-            err_str = str(e).lower()
-            if any(k in err_str for k in ('429', 'quota', 'exhausted', 'rate')):
-                print(f"   ⏳ Limite Free Tier ({tentativo}/4). Attendo 22s...")
-                time.sleep(22)
-            elif any(k in err_str for k in ('503', '504', 'deadline', 'unavailable', 'overloaded')):
-                attesa = 10 * tentativo
-                print(f"   ⏳ Server Google sovraccarichi ({tentativo}/4). Attendo {attesa}s...")
-                time.sleep(attesa)
-            else:
-                print(f"   ⚠️ Errore temporaneo Gemini ({tentativo}/4): {e}. Riprovo...")
-                time.sleep(6)
-    raise RuntimeError(f"Gemini non ha risposto dopo 4 tentativi: {ultimo_errore}")
+                except Exception as e_cfg:
+                    if 'thinking' in str(e_cfg).lower() or '400' in str(e_cfg):
+                        risp = client.models.generate_content(
+                            model=mod,
+                            contents=prompt
+                        )
+                    else:
+                        raise e_cfg
+                if risp and risp.text:
+                    return risp.text.strip()
+            except Exception as e:
+                ultimo_errore = e
+                err_str = str(e).lower()
+                # Se il modello non esiste o non supporta generate_content, rimuovilo
+                if '404' in err_str or 'not found' in err_str or 'not supported' in err_str:
+                    if mod in MODELLI_ATTIVI:
+                        MODELLI_ATTIVI.remove(mod)
+                    continue
+                # Se ha esaurito la quota GIORNALIERA (per day), passa subito al prossimo modello!
+                if 'per day' in err_str or 'per_day' in err_str or 'daily' in err_str:
+                    print(f"   ⚠️ Quota giornaliera (20/giorno) esaurita per {mod}. Passo al modello successivo...")
+                    if mod in MODELLI_ATTIVI:
+                        MODELLI_ATTIVI.remove(mod)
+                    continue
+                # Se è solo limite al minuto (RPM), attendi 20s e riprova
+                if any(k in err_str for k in ('429', 'quota', 'exhausted', 'rate')):
+                    print(f"   ⏳ Limite al minuto su {mod}. Attendo 20s...")
+                    time.sleep(20)
+                    continue
+                if any(k in err_str for k in ('503', '504', 'deadline', 'unavailable', 'overloaded')):
+                    print(f"   ⏳ Server {mod} occupato ({tentativo}/3). Provo alternativa o attendo 12s...")
+                    time.sleep(12)
+                    continue
+        if not MODELLI_ATTIVI:
+            break
+    raise RuntimeError(f"Impossibile completare la richiesta Gemini: {ultimo_errore}")
 
 def pulisci_nome_azienda(nome):
     if not nome:
@@ -560,6 +594,8 @@ def integra_referenti_mancanti(worksheet_assistente, dati_prospect):
     inizio_controllo = max(1, tot_righe - 20)
     
     for idx in range(inizio_controllo, tot_righe):
+        if not MODELLI_ATTIVI:
+            break
         riga_p = dati_prospect[idx]
         num_riga_sheet = idx + 1
         
@@ -632,6 +668,10 @@ def main():
                 domini_gia_in_prospect.add(dom_p)
     
     for i in range(1, len(dati)):
+        if not MODELLI_ATTIVI:
+            print("🛑 Tutte le quote giornaliere gratuite dei modelli sono state consumate. Riprenderà al prossimo reset!")
+            break
+
         riga = dati[i]
         if len(riga) < 2:
             continue
@@ -684,6 +724,28 @@ def main():
                 continue
 
             try:
+                soup = BeautifulSoup(html_pagina, 'html.parser')
+                titolo = (
+                    soup.title.string.strip()
+                    if soup.title and soup.title.string
+                    else "Sito Aziendale"
+                )
+                for tag in soup(["script", "style", "nav", "footer", "svg", "noscript"]):
+                    tag.decompose()
+                testo = soup.get_text(separator=' ', strip=True)[:4500]
+                testo_check = f"{titolo} {url_sito} {testo}".lower()
+
+                # PRE-FILTRO A COSTO ZERO: se non c'è nemmeno una parola legata a lavoro/vendita/agenti, esclude senza consumare chiamate Gemini!
+                if not any(kw in testo_check for kw in PAROLE_CHIAVE_AGENTE):
+                    val_no_kw = [[dominio, titolo[:100], "ESCLUSO", data_odierna]]
+                    worksheet_master.update(
+                        values=val_no_kw,
+                        range_name=f"B{numero_riga}:E{numero_riga}"
+                    )
+                    print(f"   ⚡ Riga {numero_riga} esclusa da pre-filtro rapido (nessun annuncio vendita/lavoro): {dominio}")
+                    time.sleep(0.8)
+                    continue
+
                 emails_trovate = re.findall(
                     r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',
                     html_pagina
@@ -705,16 +767,6 @@ def main():
                     and not any(pec in e.lower() for pec in esclusioni_pec)
                 ]))
                 email_suggerita = emails_pulite[0] if emails_pulite else "NESSUNA"
-
-                soup = BeautifulSoup(html_pagina, 'html.parser')
-                titolo = (
-                    soup.title.string.strip()
-                    if soup.title and soup.title.string
-                    else "Sito Aziendale"
-                )
-                for tag in soup(["script", "style", "nav", "footer", "svg", "noscript"]):
-                    tag.decompose()
-                testo = soup.get_text(separator=' ', strip=True)[:4500]
                 
                 prompt_web = f"""
                 Analizza questo testo di una pagina web per una società di ricerca e selezione agenti di commercio.
@@ -770,14 +822,14 @@ def main():
                 regione_sito = parti[6].strip() if len(parti) > 6 else "--"
                 
                 if "AGENTE" not in esito:
-                    val_no_ag = [[dominio, titolo, esito, data_odierna]]
+                    val_no_ag = [[dominio, titolo[:100], esito, data_odierna]]
                     worksheet_master.update(
                         values=val_no_ag,
                         range_name=f"B{numero_riga}:E{numero_riga}"
                     )
                     print(f"   ✔️ Riga {numero_riga} classificata: {esito} ({dominio})")
                 else:
-                    val_si_ag = [[titolo, esito, data_odierna]]
+                    val_si_ag = [[titolo[:100], esito, data_odierna]]
                     worksheet_master.update(
                         values=val_si_ag,
                         range_name=f"C{numero_riga}:E{numero_riga}"
@@ -841,7 +893,7 @@ def main():
                     nuova_riga = [
                         nome_reale.upper(),
                         url_sito,
-                        titolo,
+                        titolo[:100],
                         esito,
                         stato_crm,
                         email_azienda_finale,
