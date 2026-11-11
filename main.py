@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 from google import genai
 from google.genai import types
 from google.oauth2.service_account import Credentials
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 from datetime import datetime
 
 sys.stdout.reconfigure(line_buffering=True)
@@ -29,13 +29,10 @@ scopes = [
 creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
 gc = gspread.authorize(creds)
 
-# Legge da 1 a N chiavi API (separate da virgola, punto e virgola o a capo nel Secret GEMINI_API_KEY)
 LISTA_CHIAVI = [
     k.strip() for k in re.split(r'[,;\s\n]+', gemini_keys_raw) if k.strip()
 ]
-
-# Raccoglie anche eventuali secret aggiuntivi GEMINI_API_KEY_2, GEMINI_API_KEY_3, GEMINI_API_KEY_4
-for idx_k in range(2, 10):
+for idx_k in range(2, 15):
     extra_k = (os.environ.get(f'GEMINI_API_KEY_{idx_k}') or '').strip()
     if extra_k and extra_k not in LISTA_CHIAVI:
         LISTA_CHIAVI.append(extra_k)
@@ -55,7 +52,6 @@ for idx, k in enumerate(LISTA_CHIAVI, start=1):
     except Exception as e_cl:
         print(f"⚠️ Errore inizializzazione Chiave #{idx}: {e_cl}")
 
-# Rileva per ciascuna chiave eventuali modelli secondari attivi (es. flash-lite)
 if CLIENTS_POOL:
     try:
         modelli_extra = []
@@ -73,9 +69,7 @@ if CLIENTS_POOL:
     except Exception:
         pass
 
-print(f"🔑 Chiavi Gemini caricate nel pool a rotazione: {len(CLIENTS_POOL)}")
-for item in CLIENTS_POOL:
-    print(f"   - {item['id']} -> Modelli: {item['modelli']}")
+print(f"🔑 Chiavi Gemini caricate nel pool: {len(CLIENTS_POOL)}")
 
 HEADERS_BROWSER = {
     'User-Agent': (
@@ -105,11 +99,42 @@ PATH_AGGREGATORI_DA_BLOCCARE = (
     '/companies/', '/company/', '/aziende/', '/azienda/', '/directory/', '/profile/'
 )
 
+# Pre-filtro focalizzato su figure commerciali per non sprecare chiamate su annunci di soli operai/impiegati
 PAROLE_CHIAVE_AGENTE = (
     'agent', 'rappresentant', 'vendit', 'commercial', 'enasarco',
-    'plurimandat', 'monomandat', 'procacciat', 'lavora con noi',
-    'collabora', 'candidat', 'curriculum', 'posizioni aperte', 'carriere', 'sales'
+    'plurimandat', 'monomandat', 'procacciat', 'p.iva', 'p. iva',
+    'partita iva', 'rete vendita', 'sales', 'mandat', 'provvigion'
 )
+
+MAPPA_PROVINCE_REGIONI = {
+    'AG': 'SICILIA', 'AL': 'PIEMONTE', 'AN': 'MARCHE', 'AO': "VALLE D'AOSTA",
+    'AR': 'TOSCANA', 'AP': 'MARCHE', 'AT': 'PIEMONTE', 'AV': 'CAMPANIA',
+    'BA': 'PUGLIA', 'BT': 'PUGLIA', 'BL': 'VENETO', 'BN': 'CAMPANIA',
+    'BG': 'LOMBARDIA', 'BI': 'PIEMONTE', 'BO': 'EMILIA-ROMAGNA', 'BZ': 'TRENTINO-ALTO ADIGE',
+    'BS': 'LOMBARDIA', 'BR': 'PUGLIA', 'CA': 'SARDEGNA', 'CL': 'SICILIA',
+    'CB': 'MOLISE', 'CE': 'CAMPANIA', 'CT': 'SICILIA', 'CZ': 'CALABRIA',
+    'CH': 'ABRUZZO', 'CO': 'LOMBARDIA', 'CS': 'CALABRIA', 'CR': 'LOMBARDIA',
+    'KR': 'CALABRIA', 'CN': 'PIEMONTE', 'EN': 'SICILIA', 'FM': 'MARCHE',
+    'FE': 'EMILIA-ROMAGNA', 'FI': 'TOSCANA', 'FG': 'PUGLIA', 'FC': 'EMILIA-ROMAGNA',
+    'FR': 'LAZIO', 'GE': 'LIGURIA', 'GO': 'FRIULI-VENEZIA GIULIA', 'GR': 'TOSCANA',
+    'IM': 'LIGURIA', 'IS': 'MOLISE', 'SP': 'LIGURIA', 'AQ': 'ABRUZZO',
+    'LT': 'LAZIO', 'LE': 'PUGLIA', 'LC': 'LOMBARDIA', 'LI': 'TOSCANA',
+    'LO': 'LOMBARDIA', 'LU': 'TOSCANA', 'MC': 'MARCHE', 'MN': 'LOMBARDIA',
+    'MS': 'TOSCANA', 'MT': 'BASILICATA', 'ME': 'SICILIA', 'MI': 'LOMBARDIA',
+    'MO': 'EMILIA-ROMAGNA', 'MB': 'LOMBARDIA', 'NA': 'CAMPANIA', 'NO': 'PIEMONTE',
+    'NU': 'SARDEGNA', 'OR': 'SARDEGNA', 'PD': 'VENETO', 'PA': 'SICILIA',
+    'PR': 'EMILIA-ROMAGNA', 'PV': 'LOMBARDIA', 'PG': 'UMBRIA', 'PU': 'MARCHE',
+    'PE': 'ABRUZZO', 'PC': 'EMILIA-ROMAGNA', 'PI': 'TOSCANA', 'PT': 'TOSCANA',
+    'PN': 'FRIULI-VENEZIA GIULIA', 'PZ': 'BASILICATA', 'PO': 'TOSCANA', 'RG': 'SICILIA',
+    'RA': 'EMILIA-ROMAGNA', 'RC': 'CALABRIA', 'RE': 'EMILIA-ROMAGNA', 'RI': 'LAZIO',
+    'RN': 'EMILIA-ROMAGNA', 'RM': 'LAZIO', 'RO': 'VENETO', 'SA': 'CAMPANIA',
+    'SS': 'SARDEGNA', 'SV': 'LIGURIA', 'SI': 'TOSCANA', 'SR': 'SICILIA',
+    'SO': 'LOMBARDIA', 'SU': 'SARDEGNA', 'TA': 'PUGLIA', 'TE': 'ABRUZZO',
+    'TR': 'UMBRIA', 'TO': 'PIEMONTE', 'TP': 'SICILIA', 'TN': 'TRENTINO-ALTO ADIGE',
+    'TV': 'VENETO', 'TS': 'FRIULI-VENEZIA GIULIA', 'UD': 'FRIULI-VENEZIA GIULIA',
+    'VA': 'LOMBARDIA', 'VE': 'VENETO', 'VB': 'PIEMONTE', 'VC': 'PIEMONTE',
+    'VR': 'VENETO', 'VV': 'CALABRIA', 'VI': 'VENETO', 'VT': 'LAZIO'
+}
 
 INDICE_CHIAVE_CORRENTE = 0
 
@@ -138,7 +163,88 @@ def scarica_pagina_sicura(url_sito, timeout_sec=10):
         encoding = r.encoding or 'utf-8'
         return raw_bytes.decode(encoding, errors='replace')
 
-def chiama_gemini_con_fallback(prompt, pausa_iniziale=4):
+def normalizza_telefono_outbound(raw_tel):
+    """Pulisce e formatta il numero di telefono per l'assistente vocale outbound."""
+    if not raw_tel or raw_tel == "--":
+        return "--"
+    t = str(raw_tel).strip()
+    t = re.sub(r'(?i)(tel\.?|telefono|phone|fax|centralino|mob\.?|cell\.?)[:\s]*', '', t)
+    t = t.split('/')[0].split('|')[0].strip()
+    solo_cifre = re.sub(r'\D', '', t)
+    if solo_cifre.startswith('0039'):
+        solo_cifre = solo_cifre[4:]
+    elif solo_cifre.startswith('39') and len(solo_cifre) >= 11:
+        solo_cifre = solo_cifre[2:]
+    if len(solo_cifre) < 8 or len(solo_cifre) > 11:
+        return "--"
+    # Evita di scambiare Partite IVA (11 cifre che non iniziano con 0 o 3) per numeri di telefono
+    if len(solo_cifre) == 11 and not (solo_cifre.startswith('0') or solo_cifre.startswith('3')):
+        return "--"
+    if not (solo_cifre.startswith('0') or solo_cifre.startswith('3') or solo_cifre.startswith('800')):
+        return "--"
+    return f"+39 {solo_cifre}"
+
+def estrai_telefoni_da_html(html_text, soup=None):
+    """Estrae il numero di telefono aziendale dai link tel: o dal testo della pagina."""
+    if not html_text:
+        return "--"
+    if soup is None:
+        soup = BeautifulSoup(html_text, 'html.parser')
+    
+    # 1. Priorità assoluta ai link cliccabili <a href="tel:...">
+    for a_tag in soup.find_all('a', href=True):
+        href = a_tag['href'].strip()
+        if href.lower().startswith('tel:'):
+            cand = normalizza_telefono_outbound(href[4:])
+            if cand != "--":
+                return cand
+
+    # 2. Ricerca regex nel testo visibile (escludendo numeri preceduti da 'Fax')
+    testo_vis = soup.get_text(separator=' ', strip=True)
+    testo_no_fax = re.sub(r'(?i)fax[\s.:]*[\+\d\s\-\.\(\)/]{8,18}', ' ', testo_vis)
+    pattern_tel = r'(?:\+39|0039)?[\s\.\-]?(?:0\d{1,3}|3\d{2})[\s\.\-\/]?[\d\s\.\-]{5,10}'
+    for match in re.findall(pattern_tel, testo_no_fax):
+        cand = normalizza_telefono_outbound(match)
+        if cand != "--":
+            return cand
+    return "--"
+
+def cerca_telefono_in_pagina_contatti(url_base, soup_iniziale):
+    """Se la pagina Lavora con noi non ha il telefono, ispeziona rapidamente la pagina Contatti."""
+    try:
+        parsed = urlparse(url_base)
+        base_root = f"{parsed.scheme}://{parsed.netloc}"
+        link_contatti = None
+        if soup_iniziale:
+            for a_tag in soup_iniziale.find_all('a', href=True):
+                href_low = a_tag['href'].lower()
+                txt_low = a_tag.get_text(strip=True).lower()
+                if 'contatt' in href_low or 'contact' in href_low or 'contatt' in txt_low:
+                    link_contatti = urljoin(base_root, a_tag['href'])
+                    break
+        if not link_contatti:
+            link_contatti = f"{base_root}/contatti"
+        if link_contatti.rstrip('/') == url_base.rstrip('/'):
+            return "--"
+        html_cont = scarica_pagina_sicura(link_contatti, timeout_sec=6)
+        return estrai_telefoni_da_html(html_cont)
+    except Exception:
+        return "--"
+
+def estrai_citta_regione_locale(indirizzo):
+    """Estrae Città e Regione in Python a costo zero (0 chiamate Gemini) dall'indirizzo Google."""
+    if not indirizzo:
+        return "--", "--"
+    # Cerca pattern italiano standard: CAP (5 cifre) + Città + Sigla Provincia (2 lettere)
+    m = re.search(r'\b(\d{5})\s+([A-Za-zÀ-ÿ\'\-\s]+?)\s+([A-Z]{2})\b', indirizzo)
+    if m:
+        citta = m.group(2).strip().upper()
+        prov = m.group(3).strip().upper()
+        regione = MAPPA_PROVINCE_REGIONI.get(prov, "--")
+        return f"{citta} {prov}", regione
+    return "--", "--"
+
+def chiama_gemini_con_fallback(prompt, pausa_iniziale=3):
     global INDICE_CHIAVE_CORRENTE
     if not ha_capacita_gemini():
         raise RuntimeError("Tutte le chiavi API hanno esaurito la quota giornaliera.")
@@ -189,23 +295,20 @@ def chiama_gemini_con_fallback(prompt, pausa_iniziale=4):
                             slot["modelli"].remove(mod)
                         continue
                     if any(x in err_str for x in ('per day', 'per_day', 'daily', 'requests per day')):
-                        print(f"   🔄 {id_chiave} ha esaurito le 20 chiamate/giorno su {mod}. Ruoto su chiave/modello successivo...")
+                        print(f"   🔄 {id_chiave} esaurita su {mod}. Ruoto chiave...")
                         if mod in slot["modelli"]:
                             slot["modelli"].remove(mod)
                         continue
                     if any(x in err_str for x in ('429', 'quota', 'exhausted', 'rate')):
-                        print(f"   ⏳ Limite al minuto su {id_chiave} ({mod}). Passo subito alla chiave successiva...")
                         break
                     if any(x in err_str for x in ('503', '504', 'deadline', 'unavailable', 'overloaded')):
-                        print(f"   ⏳ Server occupato su {id_chiave} ({mod}). Ruoto chiave...")
                         break
         if not ha_capacita_gemini():
             break
-        attesa = 10 * giro
-        print(f"   ⏳ Tutte le chiavi sono temporaneamente in pausa ({giro}/3). Attendo {attesa}s...")
+        attesa = 8 * giro
         time.sleep(attesa)
 
-    raise RuntimeError(f"Impossibile completare la richiesta Gemini su nessuna chiave: {ultimo_errore}")
+    raise RuntimeError(f"Impossibile completare la richiesta Gemini: {ultimo_errore}")
 
 def pulisci_nome_azienda(nome):
     if not nome:
@@ -312,7 +415,7 @@ def arricchisci_contatto_hubspot_esistente(
         cifre_attuale = re.sub(r'\D', '', tel_attuale)
         if not tel_attuale or tel_attuale == "--":
             aggiornamenti["phone"] = tel_nuovo
-        elif cifre_nuovo and cifre_nuovo not in cifre_attuale:
+        elif cifre_nuovo and cifre_nuovo[-8:] not in cifre_attuale:
             aggiornamenti["phone"] = f"{tel_attuale} / {tel_nuovo}"
 
     email_attuale = (props_attuali.get("email") or "").strip().lower()
@@ -453,12 +556,14 @@ def crea_hubspot_contact(
     except Exception:
         return "Errore CRM"
 
-def cerca_dati_aziendali_osint(nome_azienda):
+def cerca_dati_aziendali_osint(nome_azienda, dominio=""):
+    """Cerca Telefono e Indirizzo su Google Knowledge Graph, Google Maps Places e Snippet organici."""
     if not serper_api_key or nome_azienda == "SCONOSCIUTO":
         return None, None
     url = "https://google.serper.dev/search"
     azienda_pulita = pulisci_nome_azienda(nome_azienda)
-    payload = json.dumps({"q": azienda_pulita, "gl": "it", "hl": "it"})
+    query_osint = f'"{azienda_pulita}" {dominio} telefono contatti'.strip()
+    payload = json.dumps({"q": query_osint, "gl": "it", "hl": "it"})
     headers = {'X-API-KEY': serper_api_key, 'Content-Type': 'application/json'}
     
     try:
@@ -467,6 +572,8 @@ def cerca_dati_aziendali_osint(nome_azienda):
             data = res.json()
             telefono = None
             indirizzo = None
+            
+            # 1. Knowledge Graph
             kg = data.get('knowledgeGraph', {})
             if kg:
                 telefono = kg.get('phoneNumber')
@@ -477,6 +584,8 @@ def cerca_dati_aziendali_osint(nome_azienda):
                         if 'telefon' in key.lower() or 'phone' in key.lower():
                             telefono = val
                             break
+            
+            # 2. Google Maps Places
             if not telefono or not indirizzo:
                 places = data.get('places', [])
                 for place in places:
@@ -486,28 +595,26 @@ def cerca_dati_aziendali_osint(nome_azienda):
                         indirizzo = place.get('address')
                     if telefono and indirizzo:
                         break
-            return telefono, indirizzo
+            
+            # 3. Estrazione da Snippet Organici (se l'azienda non ha scheda Maps)
+            if not telefono:
+                for org in data.get('organic', [])[:5]:
+                    snip = f"{org.get('title', '')} {org.get('snippet', '')}"
+                    snip_no_fax = re.sub(r'(?i)fax[\s.:]*[\+\d\s\-\.\(\)/]{8,18}', ' ', snip)
+                    m_tel = re.findall(r'(?:\+39|0039)?[\s\.\-]?(?:0\d{1,3}|3\d{2})[\s\.\-\/]?[\d\s\.\-]{5,10}', snip_no_fax)
+                    for cand_raw in m_tel:
+                        cand_norm = normalizza_telefono_outbound(cand_raw)
+                        if cand_norm != "--":
+                            telefono = cand_norm
+                            break
+                    if telefono:
+                        break
+
+            tel_norm = normalizza_telefono_outbound(telefono) if telefono else None
+            return (tel_norm if tel_norm != "--" else None), indirizzo
     except Exception:
         pass
     return None, None
-
-def formatta_indirizzo_osint(indirizzo):
-    if not indirizzo:
-        return "--", "--"
-    prompt = (
-        f"Estrai Città (con sigla provincia se non è capoluogo) e Regione "
-        f"da questo indirizzo: '{indirizzo}'.\n"
-        f"Rispondi ESATTAMENTE su una sola riga nel formato: CITTA | REGIONE\n"
-        f"Se manca un dato scrivi --."
-    )
-    try:
-        testo_risp = chiama_gemini_con_fallback(prompt, pausa_iniziale=2)
-        parti = testo_risp.replace("*", "").split('|')
-        citta = parti[0].strip().upper() if len(parti) > 0 else "--"
-        regione = parti[1].strip().upper() if len(parti) > 1 else "--"
-        return citta, regione
-    except Exception:
-        return "--", "--"
 
 def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
     if not serper_api_key:
@@ -634,8 +741,8 @@ def bonifica_link_scartati(worksheet_master, dati):
         worksheet_master.update(values=modifiche_col_b, range_name=f"B2:B{len(dati)}")
         time.sleep(1.5)
 
-def integra_referenti_mancanti(worksheet_assistente, dati_prospect):
-    print("Verifica ultimi 20 contatti in 'Nuovi Prospect' con referente mancante...")
+def integra_referenti_e_telefoni_mancanti(worksheet_assistente, dati_prospect):
+    print("Verifica ultimi 20 contatti in 'Nuovi Prospect' (Referente + Telefono Outbound)...")
     tot_righe = len(dati_prospect)
     inizio_controllo = max(1, tot_righe - 20)
     
@@ -649,40 +756,66 @@ def integra_referenti_mancanti(worksheet_assistente, dati_prospect):
         url_az = riga_p[1].strip() if len(riga_p) > 1 else ""
         email_az = riga_p[5].strip().lower() if len(riga_p) > 5 else ""
         referente_att = riga_p[6].strip() if len(riga_p) > 6 else ""
+        telefono_att = riga_p[9].strip() if len(riga_p) > 9 else ""
         
-        if nome_az and url_az and not referente_att:
-            dominio_az = estrai_dominio(url_az)
-            if any(agg in dominio_az for agg in AGGREGATORI_DA_BLOCCARE):
-                continue
-            print(f"🔄 Integrazione referente riga {num_riga_sheet}: {nome_az} ({dominio_az})")
-            
-            nome_dm, ruolo_dm, email_dm = cerca_decision_maker_osint(nome_az, dominio_az, email_az)
-            
-            if nome_dm != "SCONOSCIUTO":
-                ref_completo = f"{nome_dm.upper()} {ruolo_dm.upper()}".strip()
-                email_ref_finale = email_dm if email_valida(email_dm) else ""
-                
-                worksheet_assistente.update(
-                    values=[[ref_completo, email_ref_finale]],
-                    range_name=f"G{num_riga_sheet}:H{num_riga_sheet}"
-                )
-                
+        if not nome_az or not url_az:
+            continue
+        dominio_az = estrai_dominio(url_az)
+        if any(agg in dominio_az for agg in AGGREGATORI_DA_BLOCCARE):
+            continue
+
+        manca_ref = (not referente_att)
+        manca_tel = (not telefono_att or telefono_att == "--")
+
+        if manca_ref or manca_tel:
+            nome_dm, ruolo_dm, email_dm = "SCONOSCIUTO", "NESSUNO", "NESSUNA"
+            if manca_ref:
+                print(f"🔄 Integrazione referente riga {num_riga_sheet}: {nome_az}")
+                nome_dm, ruolo_dm, email_dm = cerca_decision_maker_osint(nome_az, dominio_az, email_az)
+                if nome_dm != "SCONOSCIUTO":
+                    ref_completo = f"{nome_dm.upper()} {ruolo_dm.upper()}".strip()
+                    email_ref_finale = email_dm if email_valida(email_dm) else ""
+                    worksheet_assistente.update(
+                        values=[[ref_completo, email_ref_finale]],
+                        range_name=f"G{num_riga_sheet}:H{num_riga_sheet}"
+                    )
+                else:
+                    worksheet_assistente.update(
+                        values=[["--", "NESSUNA"]],
+                        range_name=f"G{num_riga_sheet}:H{num_riga_sheet}"
+                    )
+
+            tel_trovato = None
+            if manca_tel:
+                tel_trovato, _ = cerca_dati_aziendali_osint(nome_az, dominio_az)
+                if not tel_trovato:
+                    try:
+                        html_p = scarica_pagina_sicura(url_az, timeout_sec=7)
+                        soup_p = BeautifulSoup(html_p, 'html.parser')
+                        tel_html = estrai_telefoni_da_html(html_p, soup_p)
+                        if tel_html == "--":
+                            tel_html = cerca_telefono_in_pagina_contatti(url_az, soup_p)
+                        if tel_html != "--":
+                            tel_trovato = tel_html
+                    except Exception:
+                        pass
+                if tel_trovato:
+                    worksheet_assistente.update(
+                        values=[[tel_trovato]],
+                        range_name=f"J{num_riga_sheet}"
+                    )
+                    print(f"📞 Telefono aggiunto per {nome_az}: {tel_trovato}")
+
+            if nome_dm != "SCONOSCIUTO" or tel_trovato:
                 contact_id = cerca_id_hubspot_contact(dominio_az, nome_az)
                 if contact_id:
                     arricchisci_contatto_hubspot_esistente(
                         contact_id, url_sito=url_az, email_generica=email_az,
-                        nome_dm=nome_dm, ruolo_dm=ruolo_dm, email_dm=email_ref_finale
+                        nome_dm=nome_dm, ruolo_dm=ruolo_dm,
+                        email_dm=(email_dm if email_valida(email_dm) else None),
+                        telefono=tel_trovato
                     )
-                    
-                print(f"✅ Integrato con successo: {ref_completo} | {email_ref_finale}")
-                time.sleep(1.5)
-            else:
-                worksheet_assistente.update(
-                    values=[["--", "NESSUNA"]],
-                    range_name=f"G{num_riga_sheet}:H{num_riga_sheet}"
-                )
-                print(f"ℹ️ Nessun profilo LinkedIn pubblico trovato per {nome_az}.")
-                time.sleep(1.0)
+            time.sleep(1.0)
 
 def main():
     url_foglio = (
@@ -701,7 +834,7 @@ def main():
     data_odierna = datetime.now().strftime('%d/%m/%Y')
     
     bonifica_link_scartati(worksheet_master, dati)
-    integra_referenti_mancanti(worksheet_assistente, dati_prospect)
+    integra_referenti_e_telefoni_mancanti(worksheet_assistente, dati_prospect)
     
     aziende_gia_in_prospect = set()
     domini_gia_in_prospect = set()
@@ -776,7 +909,10 @@ def main():
                     if soup.title and soup.title.string
                     else "Sito Aziendale"
                 )
-                for tag in soup(["script", "style", "nav", "footer", "svg", "noscript"]):
+                # Estrae subito il telefono dal codice HTML prima di decomporre il footer!
+                tel_da_html = estrai_telefoni_da_html(html_pagina, soup)
+
+                for tag in soup(["script", "style", "nav", "svg", "noscript"]):
                     tag.decompose()
                 testo = soup.get_text(separator=' ', strip=True)[:4500]
                 testo_check = f"{titolo} {url_sito} {testo}".lower()
@@ -787,7 +923,7 @@ def main():
                         values=val_no_kw,
                         range_name=f"B{numero_riga}:E{numero_riga}"
                     )
-                    print(f"   ⚡ Riga {numero_riga} esclusa da pre-filtro rapido (nessun annuncio vendita/lavoro): {dominio}")
+                    print(f"   ⚡ Riga {numero_riga} esclusa a costo zero (nessun termine agente/vendita): {dominio}")
                     time.sleep(0.8)
                     continue
 
@@ -842,7 +978,7 @@ def main():
                 2. NOME_AZIENDA: VERO nome del brand/azienda mandante. (Se ESCLUSO scrivi SCONOSCIUTO).
                 3. EMAIL: Indirizzo email di contatto REALE dell'azienda (NON inserire mai email finte di esempio come nome@azienda.it, né email di portali esterni come @manstar.org, né indirizzi PEC come @pcert.it o @legalmail.it. Nota: ho estratto questa email dal codice sorgente: {email_suggerita}. Usala se valida, altrimenti cercala nel testo. Se assente scrivi NESSUNA).
                 4. SETTORE: Breve specifica del settore nel quale opera l'azienda. Se non chiaro scrivi "--".
-                5. TELEFONO: Numero di telefono principale. Escludi numeri di FAX o numeri di assistenza tecnica. Se non lo trovi scrivi "--".
+                5. TELEFONO: Numero di telefono principale (Nota: ho trovato nel codice HTML: {tel_da_html}). Escludi FAX. Se non lo trovi scrivi "--".
                 6. CITTA: La città della sede. Se non è un capoluogo di provincia, aggiungi la sigla della provincia (es. "BUSTO ARSIZIO VA"). Se non la trovi scrivi "--".
                 7. REGIONE: Lo Stato/Regione (es. Lombardia, Piemonte). Se non la trovi scrivi "--".
                 
@@ -862,7 +998,9 @@ def main():
                     email = "NESSUNA"
                 settore = parti[3].strip() if len(parti) > 3 else "--"
                 
-                telefono_sito = parti[4].strip() if len(parti) > 4 else "--"
+                tel_ia_raw = parti[4].strip() if len(parti) > 4 else "--"
+                tel_ia = normalizza_telefono_outbound(tel_ia_raw)
+                telefono_sito = tel_ia if tel_ia != "--" else tel_da_html
                 citta_sito = parti[5].strip() if len(parti) > 5 else "--"
                 regione_sito = parti[6].strip() if len(parti) > 6 else "--"
                 
@@ -896,13 +1034,19 @@ def main():
                     nome_dm, ruolo_dm, email_dm = cerca_decision_maker_osint(
                         nome_reale, dominio, email
                     )
-                    tel_google, ind_google = cerca_dati_aziendali_osint(nome_reale)
+                    tel_google, ind_google = cerca_dati_aziendali_osint(nome_reale, dominio)
                     telefono_finale = tel_google if tel_google else telefono_sito
+
+                    # Se manca ancora il telefono, controlla la pagina /contatti del sito
+                    if not telefono_finale or telefono_finale == "--":
+                        tel_cont = cerca_telefono_in_pagina_contatti(url_sito, soup)
+                        if tel_cont != "--":
+                            telefono_finale = tel_cont
                     
                     citta_finale = citta_sito
                     regione_finale = regione_sito
                     if ind_google:
-                        citta_g, reg_g = formatta_indirizzo_osint(ind_google)
+                        citta_g, reg_g = estrai_citta_regione_locale(ind_google)
                         if citta_g != "--":
                             citta_finale = citta_g
                         if reg_g != "--":
@@ -944,9 +1088,11 @@ def main():
                         email_azienda_finale,
                         referente_completo,
                         email_referente_finale,
-                        data_odierna
+                        data_odierna,
+                        telefono_finale if telefono_finale else "--"
                     ]
                     worksheet_assistente.append_row(nuova_riga)
+                    print(f"   📞 Prospect salvato con Telefono Outbound: {telefono_finale}")
                     
                     if nome_pulito:
                         aziende_gia_in_prospect.add(nome_pulito)
