@@ -8,6 +8,7 @@ import gspread
 from urllib.parse import urlparse
 from google.oauth2.service_account import Credentials
 
+# Forza la stampa immediata nei log di GitHub Actions
 sys.stdout.reconfigure(line_buffering=True)
 
 creds_json = os.environ.get('GCP_CREDENTIALS')
@@ -23,10 +24,7 @@ scopes = [
 ]
 creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
 gc = gspread.authorize(creds)
-URL_FOGLIO = (
-    "https://docs.google.com/spreadsheets/d/"
-    "15K6_SNBTB-QBNwFB2L6Qjrd56wZ7clD3Tm9zM-MI7zc/edit?gid=0#gid=0"
-)
+URL_FOGLIO = "https://docs.google.com/spreadsheets/d/15K6_SNBTB-QBNwFB2L6Qjrd56wZ7clD3Tm9zM-MI7zc/edit?gid=0#gid=0"
 
 try:
     sh = gc.open_by_url(URL_FOGLIO)
@@ -50,23 +48,19 @@ azioni = [
     '"ricerca rappresentanti"',
     '"ricerca procacciatori"',
     '"ampliamento rete vendita" "agenti"',
-    'inurl:lavora-con-noi "agenti"',
-    'intitle:"lavora con noi" "agenti"',
-    'inurl:collabora-con-noi ("agenti" OR "venditori" OR "commerciale")',
+    '"mandato di agenzia" ("lavora con noi" OR "candidati" OR "ricerca")',
+    '"inquadramento enasarco" ("lavora" OR "ricerca" OR "selezioniamo")',
+    '"venditori a partita iva" OR "commerciali p.iva"',
+    '"tecnico commerciale" "enasarco"',
+    '"agente plurimandatario" ("cerchiamo" OR "selezioniamo" OR "ricerca")',
+    '"potenziamento rete vendita" ("agenti" OR "venditori")',
+    '"inserimento agenti" OR "inserimento rappresentanti"',
+    'inurl:lavora-con-noi ("agenti" OR "enasarco" OR "plurimandatari")',
+    'inurl:collabora-con-noi ("agenti" OR "venditori" OR "commerciali")',
+    'inurl:ricerca-agenti OR inurl:diventa-agente',
     'inurl:posizioni-aperte ("agente" OR "agenti" OR "enasarco")',
-    'inurl:carriere ("agente di commercio" OR "agenti plurimandatari")',
-    '"mandato di agenzia" ("lavora con noi" OR "cerchiamo" OR "ricerca")',
-    '"inquadramento enasarco" ("cerchiamo" OR "selezioniamo" OR "lavora con noi")',
-    '"contratto enasarco" ("srl" OR "spa")',
-    '"figure commerciali" "partita iva" ("srl" OR "spa")',
-    '"tecnico commerciale" ("enasarco" OR "plurimandatario" OR "monomandatario")',
-    '"venditori plurimandatari"',
-    '"venditori a partita iva"',
-    '"agente plurimandatario" ("srl" OR "spa")',
-    '"agente monomandatario" ("srl" OR "spa")',
-    '"potenziamento rete vendita" ("agenti" OR "commerciali")',
-    '"sviluppo rete vendita" ("cerchiamo" OR "ricerchiamo") "agenti"',
-    'intitle:"ricerca agenti" ("srl" OR "spa")'
+    'intitle:"lavora con noi" ("agenti" OR "rappresentanti")',
+    'intitle:"ricerca agenti" OR intitle:"cerchiamo agenti"'
 ]
 
 settori = [
@@ -79,33 +73,39 @@ settori = [
     "carpenteria", "stampaggio", "automazione industriale", "detergenza",
     "estetica professionale", "ricambi", "componentistica", "bevande", "vini",
     "medical devices", "ortopedia", "cartotecnica", "etichettificio", "vernici",
-    "rubinetteria", "valvole", "pneumatica", "refrigerazione", "climatizzazione",
-    "antincendio", "carrelli elevatori", "scaffalature", "imballaggi",
-    "guarnizioni", "verniciatura", "saldatura", "compressori", "pompe industriali",
-    "depurazione acque", "trattamento aria", "odontoiatria", "dentale",
-    "veterinaria", "zootecnia", "mangimi", "fertilizzanti", "sementi",
-    "torrefazione", "surgelati", "panificazione", "pasticceria", "gelateria",
-    "attrezzature ristorazione", "pulizia professionale", "monouso", "infissi",
-    "porte interne", "tende da sole", "schermature solari", "pavimentazioni",
-    "ceramiche", "arredo bagno", "arredo ufficio", "contract", "calzature",
-    "pelletteria", "tessile", "abbigliamento da lavoro", "stampa digitale",
-    "arti grafiche", "espositori", "ascensori", "automazioni cancelli",
-    "strumentazione", "laboratorio", "fitosanitari", "nutraceutica", "integratori"
+    "imballaggi", "refrigerazione", "climatizzazione", "pneumatica", "valvole",
+    "rubinetteria", "ceramiche", "pavimenti", "rivestimenti", "isolanti",
+    "colorificio", "adesivi", "sigillanti", "abrasivi", "saldatura",
+    "compressori", "carrelli elevatori", "scaffalature", "arredo bagno",
+    "arredo ufficio", "contract", "forniture alberghiere", "ristorazione collettiva",
+    "surgelati", "panificazione", "pasticceria", "caffe", "torrefazione",
+    "integratori", "nutraceutica", "farmaceutico", "dentale", "odontoiatrico",
+    "veterinaria", "pet food", "zootecnia", "fertilizzanti", "sementi",
+    "enologia", "oleificio", "conserve", "salumificio", "caseificio",
+    "tessile", "abbigliamento da lavoro", "calzaturificio", "pelletteria",
+    "occhialeria", "galvanica", "fonderia", "torneria", "lavorazioni meccaniche",
+    "lamiere", "profilati", "alluminio", "acciaio", "materie plastiche",
+    "gomma", "guarnizioni", "cavi elettrici", "quadri elettrici", "sensoristica",
+    "strumentazione", "laboratorio", "depurazione", "trattamento acque",
+    "ecologia", "smaltimento rifiuti", "antincendio", "videosorveglianza",
+    "controllo accessi", "gestionale", "erp", "cybersecurity", "stampa digitale",
+    "flessografia", "litografia", "espositori", "visual merchandising"
 ]
 
 province = [
     "Milano", "Brescia", "Verona", "Torino", "Bologna", "Roma", "Padova", "Vicenza",
     "Treviso", "Bergamo", "Firenze", "Napoli", "Varese", "Monza", "Como", "Modena",
     "Parma", "Reggio Emilia", "Cuneo", "Udine", "Pordenone", "Lecco", "Novara",
-    "Mantova", "Cremona", "Piacenza", "Rimini", "Ancona", "Bari", "Lombardia",
-    "Veneto", "Emilia Romagna", "Piemonte", "Toscana", "Marche",
-    "Prato", "Lucca", "Pisa", "Arezzo", "Siena", "Perugia", "Terni", "Umbria",
-    "Pesaro", "Macerata", "Ascoli Piceno", "Fermo", "Pescara", "Chieti", "Teramo",
-    "Abruzzo", "Caserta", "Salerno", "Avellino", "Campania", "Taranto", "Lecce",
-    "Foggia", "Puglia", "Catania", "Palermo", "Messina", "Ragusa", "Sicilia",
-    "Cagliari", "Sardegna", "Trento", "Bolzano", "Alessandria", "Asti", "Biella",
-    "Vercelli", "Forlì", "Cesena", "Ravenna", "Ferrara", "Rovigo", "Belluno",
-    "Trieste", "Genova", "Savona", "Liguria", "Latina", "Frosinone", "Viterbo"
+    "Mantova", "Cremona", "Piacenza", "Rimini", "Ancona", "Bari", "Forlì", "Cesena",
+    "Ravenna", "Ferrara", "Pesaro", "Macerata", "Ascoli Piceno", "Fermo", "Perugia",
+    "Terni", "Arezzo", "Lucca", "Pisa", "Prato", "Pistoia", "Siena", "Genova",
+    "Alessandria", "Asti", "Biella", "Vercelli", "Pavia", "Lodi", "Sondrio",
+    "Trento", "Bolzano", "Belluno", "Rovigo", "Venezia", "Trieste", "Gorizia",
+    "Pescara", "Chieti", "Teramo", "L'Aquila", "Latina", "Frosinone", "Viterbo",
+    "Caserta", "Salerno", "Avellino", "Benevento", "Foggia", "Barletta", "Taranto",
+    "Brindisi", "Lecce", "Catania", "Palermo", "Messina", "Ragusa", "Siracusa",
+    "Cagliari", "Sassari", "Lombardia", "Veneto", "Emilia Romagna", "Piemonte",
+    "Toscana", "Marche", "Friuli", "Puglia", "Campania", "Sicilia", "Abruzzo", "Umbria"
 ]
 
 siti_da_escludere = [
@@ -147,24 +147,26 @@ siti_da_escludere = [
     'tutto626.it', 'claude.com', 'job4italy.com', 'trendsrl.net', 'profili.it',
     'gesacom.it', 'federprivacy.org', 'affida.credit', 'credipass.it',
     'sellapersonalcredit.it', 'vivienergia.it', 'trasparenza-valutazione-merito.it',
-    'jimdoweb.com', 'webnode.it', 'webnode.page', 'made-in-china.com', 'alibaba.com',
-    'agriaffaires.', 'machineryzone.', 'noleggiamoauto.it', 'partitaiva24.it',
-    'winddoc.com', 'leadsenseb2b.com', 'italiaatavola.net', 'wewelfare.it',
-    'mecspe.com', 'infowine.com', 'gdonews.it', 'eventipress.com',
-    'informazionesenzafiltro.it', 'senato.it', 'virgilio.it', 'leggo.it',
-    'mattinopadova.it', 'elledecor.com', 'github.com', 'infobel.com',
-    'openedition.org', 'legambiente.it', 'ny.gov', 'unito.it', 'agent321.',
-    'freshplaza.it', 'ricercaimprese.com'
+    'jimdoweb.com', 'webnode.it', 'webnode.page', 'wixsite.com', 'altervista.org',
+    'made-in-china.com', 'alibaba.com', 'agriaffaires.', 'machineryzone.',
+    'noleggiamoauto.it', 'senato.it', 'virgilio.it', 'leggo.it', 'mattinopadova.it',
+    'elledecor.com', 'github.com', 'infobel.com', 'openedition.org', 'legambiente.it',
+    'ny.gov', 'unito.it', 'agent321.', 'freshplaza.it', 'ricercaimprese.com',
+    'partitaiva24.it', 'italiaatavola.net', 'informazionesenzafiltro.it',
+    'eventipress.com', 'studiolegale', 'avvocato', 'commercialista', 'consulentedellavoro',
+    'gdonews.it', 'infowine.com', 'mecspe.com', 'wewelfare.it', 'repubblica.it',
+    'ilsole24ore.com', 'milano.zone', 'today.it', 'fanpage.it', 'ansa.it', 'adnkronos.com'
 ]
 
 path_da_escludere = [
-    '/sitemap', '/blog/', '/news/', '/category/', '/tag/', '/author/',
-    '/articolo/', '/economia/', '/storia-', '/incontri', '/global/',
-    '/corporate/', '/investors/', 'careers.', 'jobs.', '/prodotti/',
-    '/product/', '/portfolio/', '/case-study/', '/caso-studio/',
-    '/punti-vendita', '/trova-rivendit', '/account/', '/magazine/',
-    '/companies/', '/company/', '/aziende/', '/azienda/', '/directory/', '/profile/',
-    '/privacy', '/cookie', '/termini-e-condizioni', '/aliquote-'
+    '/sitemap', '/blog/', '/news/', '/notizie/', '/category/', '/tag/', '/author/',
+    '/articolo/', '/articoli/', '/economia/', '/cronaca/', '/storia-', '/incontri',
+    '/global/', '/corporate/', '/investors/', 'careers.', 'jobs.', '/prodotti/',
+    '/product/', '/shop/', '/carrello', '/checkout', '/portfolio/', '/case-study/',
+    '/caso-studio/', '/punti-vendita', '/trova-rivendit', '/rivenditori', '/account/',
+    '/magazine/', '/eventi/', '/evento/', '/fiere/', '/normativa', '/aliquote',
+    '/calcolo-', '/guida-', '/come-diventare', '/chi-e-l-agente',
+    '/companies/', '/company/', '/aziende/', '/azienda/', '/directory/', '/profile/'
 ]
 
 def estrai_dominio(testo_url):
@@ -178,35 +180,40 @@ def estrai_dominio(testo_url):
 def ha_segnali_reali_ricerca_agenti(titolo, snippet, link):
     testo_completo = f"{titolo} {snippet} {link}".lower()
 
-    esclusioni_semantiche = [
-        'agenti ai', 'agente ai', 'agenti ia', 'intelligenza artificiale',
-        'agenti patogeni', 'agenti chimici', 'agenti cancerogeni',
-        'agenti atmosferici', 'agenti pulenti', 'agenti immobiliari',
-        'agente in attività finanziaria', 'mediazione creditizia',
-        'aliquote enasarco', 'calcolo enasarco', 'aprire partita iva'
-    ]
+    esclusioni_semantiche = (
+        'agenti ai', 'agente ai', 'agenti ia', 'agenti digitali', 'agentic',
+        'intelligenza artificiale', 'agenti patogeni', 'agenti chimici',
+        'agenti cancerogeni', 'agenti atmosferici', 'agenti fisici',
+        'agenti immobiliari', 'agente immobiliare', 'mediazione creditizia',
+        'agente in attivita finanziaria', 'agente assicurativo', 'subagente',
+        'aliquote enasarco', 'calcolo enasarco', 'aprire partita iva',
+        'codice ateco', 'concorso pubblico', 'agenti di polizia', 'agenti municipali'
+    )
     if any(escl in testo_completo for escl in esclusioni_semantiche):
         return False
 
-    parole_target = [
-        'agent', 'rappresentant', 'procacciat', 'vendit', 'commercial',
-        'plurimandat', 'monomandat', 'enasarco'
-    ]
+    parole_target = (
+        'agent', 'rappresentant', 'procacciat', 'vendit',
+        'commercial', 'plurimandat', 'monomandat', 'enasarco'
+    )
     if not any(pt in testo_completo for pt in parole_target):
         return False
 
-    segnali_selezione = [
+    segnali_selezione = (
         'lavora', 'job', 'carriere', 'careers', 'cerchiamo', 'cercasi',
         'ricerca', 'ricerchiamo', 'selezion', 'candidat', 'invia', 'curriculum',
-        'diventa', 'collabora', 'posizion', 'opportunità', 'ampliamento',
-        'inserimento', 'plurimandat', 'monomandat', 'enasarco', 'mandato'
-    ]
+        'diventa', 'collabora', 'posizion', 'opportunit', 'ampliamento',
+        'potenziamento', 'inserimento', 'plurimandat', 'monomandat', 'enasarco', 'mandato'
+    )
     if not any(ss in testo_completo for ss in segnali_selezione):
         return False
 
     return True
 
 def main():
+    TARGET_NUOVI_ANNUNCI = 120
+    MAX_QUERIES = 115
+
     colonna_b_master = worksheet.col_values(2)
     colonna_b_prospect = worksheet_prospect.col_values(2)
 
@@ -217,59 +224,48 @@ def main():
             if dominio:
                 domini_inseriti.add(dominio)
 
-    print(f"📚 Domini storici già in archivio (anti-duplicato): {len(domini_inseriti)}")
+    print(f"Domini storici già in archivio (anti-duplicato): {len(domini_inseriti)}")
 
     dati_da_inserire = []
     combinazioni_usate = set()
-    TARGET_NUOVI_ANNUNCI = 110
-    MAX_RICERCHE_SERPER = 110
 
-    for _ in range(MAX_RICERCHE_SERPER):
+    for idx_q in range(1, MAX_QUERIES + 1):
         azione = random.choice(azioni)
         settore = random.choice(settori)
         provincia = random.choice(province)
+        pagina = random.choice([1, 2, 3])
 
-        modalita = random.choices([1, 2, 3, 4], weights=[35, 20, 25, 20], k=1)[0]
-        tbs_param = None
-
+        modalita = random.choice([1, 2, 3, 4])
         if modalita == 1:
-            query_base = f'{azione} {settore}'
-            pagina = random.choice([1, 2, 3, 4, 5, 6])
+            query_base = f'site:.it {azione} "{settore}"'
         elif modalita == 2:
             query_base = f'{azione} {settore} {provincia}'
-            pagina = random.choice([1, 2])
         elif modalita == 3:
-            query_base = f'{azione} {provincia} (srl OR spa)'
-            pagina = random.choice([1, 2, 3, 4, 5])
+            query_base = f'site:.it {azione} {provincia} (srl OR spa)'
         else:
-            query_base = f'{azione} {settore}'
-            pagina = random.choice([1, 2])
-            tbs_param = random.choice(["qdr:m", "qdr:y"])
+            query_base = f'{azione} "{settore}" (srl OR spa)'
 
-        chiave_combo = f"{query_base}_{pagina}_{tbs_param}"
+        chiave_combo = f"{query_base}_{pagina}"
         if chiave_combo in combinazioni_usate:
             continue
         combinazioni_usate.add(chiave_combo)
 
         esclusioni_q = (
-            '-immobiliare -assicurazioni -franchising -concorso '
-            '-subito -indeed -linkedin -"agenti ai" -luce -gas'
+            '-immobiliare -assicurazioni -finanziaria -luce -gas -energia '
+            '-franchising -concorso -subito -indeed -linkedin -"agenti ai"'
         )
         query = f'{query_base} {esclusioni_q}'
-        tag_fresco = f" [Recenti:{tbs_param}]" if tbs_param else ""
-        print(f"Eseguo query (Pag. {pagina}{tag_fresco}): {query}")
+        print(f"[{idx_q}/{MAX_QUERIES}] Query (Pag. {pagina}): {query}")
 
         url = "https://google.serper.dev/search"
         payload_dict = {
             "q": query,
             "gl": "it",
             "hl": "it",
-            "num": 10
+            "num": 20
         }
         if pagina > 1:
             payload_dict["page"] = pagina
-        if tbs_param:
-            payload_dict["tbs"] = tbs_param
 
         headers = {
             'X-API-KEY': serper_api_key,
@@ -277,20 +273,16 @@ def main():
         }
 
         try:
-            response = requests.post(
-                url, headers=headers, data=json.dumps(payload_dict), timeout=15
-            )
+            response = requests.post(url, headers=headers, data=json.dumps(payload_dict), timeout=15)
 
             if response.status_code == 400 and "Not enough credits" in response.text:
-                print("⚠️ Crediti Serper esauriti. Interrompo la ricerca.")
+                print("Crediti Serper esauriti. Interrompo la ricerca.")
                 break
 
-            if response.status_code == 400 and ("page" in payload_dict or "tbs" in payload_dict):
+            if response.status_code == 400 and ("page" in payload_dict or "num" in payload_dict):
+                payload_dict.pop("num", None)
                 payload_dict.pop("page", None)
-                payload_dict.pop("tbs", None)
-                response = requests.post(
-                    url, headers=headers, data=json.dumps(payload_dict), timeout=15
-                )
+                response = requests.post(url, headers=headers, data=json.dumps(payload_dict), timeout=15)
 
             response.raise_for_status()
             data = response.json()
@@ -301,20 +293,20 @@ def main():
                 continue
 
             for item in risultati:
-                titolo = item.get('title', 'Sito Aziendale')
-                snippet = item.get('snippet', '')
-                link_originale = item.get('link', '')
+                titolo = (item.get('title') or 'Sito Aziendale').strip()
+                snippet = (item.get('snippet') or '').strip()
+                link_originale = (item.get('link') or '').strip()
                 link = link_originale.lower()
 
-                if not link or link.endswith(('.pdf', '.doc', '.docx', '.xls', '.xlsx')):
+                if not link or link.endswith(('.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.zip')):
                     continue
 
                 titolo_lower = titolo.lower()
-                parole_ban_titolo = [
-                    'immobiliare', 'incontri', 'cerco ragazza', 'trans ',
-                    'concorso pubblico', 'multinazionale', 'bokep', 'porn',
-                    'agenti ai', 'intelligenza artificiale', 'mediazione creditizia'
-                ]
+                parole_ban_titolo = (
+                    'immobiliare', 'incontri', 'cerco ragazza', 'trans ', 'concorso pubblico',
+                    'multinazionale', 'bokep', 'porn', 'agenti ai', 'intelligenza artificiale',
+                    'calcolo enasarco', 'aliquote enasarco', 'aprire partita iva'
+                )
                 if any(p in titolo_lower for p in parole_ban_titolo):
                     continue
 
@@ -325,11 +317,12 @@ def main():
                     continue
 
                 dominio_estratto = estrai_dominio(link)
+                if not dominio_estratto or dominio_estratto in domini_inseriti:
+                    continue
 
                 if not any(sito_vietato in link for sito_vietato in siti_da_escludere):
-                    if dominio_estratto and dominio_estratto not in domini_inseriti:
-                        dati_da_inserire.append([titolo, link_originale])
-                        domini_inseriti.add(dominio_estratto)
+                    dati_da_inserire.append([titolo, link_originale])
+                    domini_inseriti.add(dominio_estratto)
 
                 if len(dati_da_inserire) >= TARGET_NUOVI_ANNUNCI:
                     break
@@ -342,14 +335,14 @@ def main():
         if len(dati_da_inserire) >= TARGET_NUOVI_ANNUNCI:
             break
 
-        time.sleep(1.0)
+        time.sleep(0.9)
 
     if dati_da_inserire:
         try:
             worksheet.append_rows(dati_da_inserire, value_input_option='USER_ENTERED')
-            print(f"✅ Aggiunti con successo {len(dati_da_inserire)} annunci REALI di ricerca agenti!")
+            print(f"Aggiunti con successo {len(dati_da_inserire)} nuovi annunci REALI di ricerca agenti!")
         except Exception as e_sheet:
-            print(f"⚠️ Errore durante il salvataggio su Google Sheet: {e_sheet}")
+            print(f"Errore durante il salvataggio su Google Sheet: {e_sheet}")
     else:
         print("Nessun nuovo prospect trovato in questa sessione.")
 
