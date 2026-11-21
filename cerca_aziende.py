@@ -48,7 +48,7 @@ azioni = [
     '"ricerca rappresentanti"',
     '"ricerca procacciatori"',
     '"ampliamento rete vendita" "agenti"',
-    '"mandato di agenzia" ("lavora con noi" OR "candidati" OR "ricerca")',
+    '"mandato di agenzia" ("lavora con noi" OR "candidatura" OR "ricerca")',
     '"inquadramento enasarco" ("lavora" OR "ricerca" OR "selezioniamo")',
     '"venditori a partita iva" OR "commerciali p.iva"',
     '"tecnico commerciale" "enasarco"',
@@ -142,7 +142,8 @@ siti_da_escludere = [
     'studocu.com', 'halleyweb.com', 'mondobirra.org', 'manstar', 'kompass',
     'europages', 'informazione-aziende', 'ufficiocamerale', 'fatturatoitalia',
     'signalhire', 'rocketreach', 'zoominfo', 'dnb.com', 'crunchbase',
-    '.edu.it', '.gov.it', 'lavoraconnoi.com', 'gazzettadellavoro.com', 'globelife.com',
+    '.edu.it', '.gov.it', '.unibo.it', 'aulab.it', 'radiogold.it', 'foodcareer.it',
+    'lavoraconnoi.com', 'gazzettadellavoro.com', 'globelife.com',
     '360forma.com', 'xing.com', 'academia.edu', 'professioneagente.it', 'go2sales.it',
     'tutto626.it', 'claude.com', 'job4italy.com', 'trendsrl.net', 'profili.it',
     'gesacom.it', 'federprivacy.org', 'affida.credit', 'credipass.it',
@@ -160,7 +161,8 @@ siti_da_escludere = [
 
 path_da_escludere = [
     '/sitemap', '/blog/', '/news/', '/notizie/', '/category/', '/tag/', '/author/',
-    '/articolo/', '/articoli/', '/economia/', '/cronaca/', '/storia-', '/incontri',
+    '/articolo/', '/articoli/', '/economia/', '/cronaca/', '/politica/', '/elezioni/',
+    '/storia-', '/incontri', '/cookie-policy', '/privacy-policy', '/cookie', '/privacy',
     '/global/', '/corporate/', '/investors/', 'careers.', 'jobs.', '/prodotti/',
     '/product/', '/shop/', '/carrello', '/checkout', '/portfolio/', '/case-study/',
     '/caso-studio/', '/punti-vendita', '/trova-rivendit', '/rivenditori', '/account/',
@@ -187,7 +189,8 @@ def ha_segnali_reali_ricerca_agenti(titolo, snippet, link):
         'agenti immobiliari', 'agente immobiliare', 'mediazione creditizia',
         'agente in attivita finanziaria', 'agente assicurativo', 'subagente',
         'aliquote enasarco', 'calcolo enasarco', 'aprire partita iva',
-        'codice ateco', 'concorso pubblico', 'agenti di polizia', 'agenti municipali'
+        'codice ateco', 'concorso pubblico', 'agenti di polizia', 'agenti municipali',
+        'elezioni', 'candidato sindaco', 'liste a sostegno', 'cookie policy', 'informativa privacy'
     )
     if any(escl in testo_completo for escl in esclusioni_semantiche):
         return False
@@ -201,9 +204,10 @@ def ha_segnali_reali_ricerca_agenti(titolo, snippet, link):
 
     segnali_selezione = (
         'lavora', 'job', 'carriere', 'careers', 'cerchiamo', 'cercasi',
-        'ricerca', 'ricerchiamo', 'selezion', 'candidat', 'invia', 'curriculum',
-        'diventa', 'collabora', 'posizion', 'opportunit', 'ampliamento',
-        'potenziamento', 'inserimento', 'plurimandat', 'monomandat', 'enasarco', 'mandato'
+        'ricerca', 'ricerchiamo', 'selezion', 'candidatura', 'candidati',
+        'invia', 'curriculum', 'diventa', 'collabora', 'posizion', 'opportunit',
+        'ampliamento', 'potenziamento', 'inserimento', 'plurimandat',
+        'monomandat', 'enasarco', 'mandato'
     )
     if not any(ss in testo_completo for ss in segnali_selezione):
         return False
@@ -233,17 +237,17 @@ def main():
         azione = random.choice(azioni)
         settore = random.choice(settori)
         provincia = random.choice(province)
-        pagina = random.choice([1, 2, 3])
+        pagina = random.choice([1, 1, 1, 2])
 
         modalita = random.choice([1, 2, 3, 4])
         if modalita == 1:
-            query_base = f'site:.it {azione} "{settore}"'
+            query_base = f'{azione} {settore}'
         elif modalita == 2:
             query_base = f'{azione} {settore} {provincia}'
         elif modalita == 3:
-            query_base = f'site:.it {azione} {provincia} (srl OR spa)'
+            query_base = f'{azione} {provincia} (srl OR spa)'
         else:
-            query_base = f'{azione} "{settore}" (srl OR spa)'
+            query_base = f'site:.it {azione} {settore}'
 
         chiave_combo = f"{query_base}_{pagina}"
         if chiave_combo in combinazioni_usate:
@@ -305,7 +309,8 @@ def main():
                 parole_ban_titolo = (
                     'immobiliare', 'incontri', 'cerco ragazza', 'trans ', 'concorso pubblico',
                     'multinazionale', 'bokep', 'porn', 'agenti ai', 'intelligenza artificiale',
-                    'calcolo enasarco', 'aliquote enasarco', 'aprire partita iva'
+                    'calcolo enasarco', 'aliquote enasarco', 'aprire partita iva',
+                    'cookie policy', 'privacy policy', 'candidato sindaco'
                 )
                 if any(p in titolo_lower for p in parole_ban_titolo):
                     continue
