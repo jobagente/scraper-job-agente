@@ -84,7 +84,8 @@ AGGREGATORI_DA_BLOCCARE = (
     'manstar', 'kompass', 'europages', 'informazione-aziende', 'ufficiocamerale',
     'fatturatoitalia', 'signalhire', 'rocketreach', 'zoominfo', 'dnb.com',
     'crunchbase', 'atoka.io', 'empresite', 'gowork.it', 'casagenti.it',
-    'xing.com', 'academia.edu', '.edu.it', '.gov.it', 'lavoraconnoi.com',
+    'xing.com', 'academia.edu', '.edu.it', '.gov.it', '.unibo.it', 'aulab.it',
+    'radiogold.it', 'foodcareer.it', 'lavoraconnoi.com',
     'gazzettadellavoro.com', 'globelife.com', '360forma.com', 'jimdoweb.com',
     'webnode.it', 'webnode.page', 'wixsite.com', 'altervista.org',
     'tutto626.it', 'claude.com', 'job4italy.com', 'trendsrl.net',
@@ -159,7 +160,11 @@ def scarica_pagina_sicura(url_sito, timeout_sec=10):
             if bytes_letti > 350000 or (time.time() - inizio) > timeout_sec:
                 break
         encoding = r.encoding or 'utf-8'
-        return b"".join(chunks).decode(encoding, errors='replace').replace('\x00', ' ')
+        try:
+            testo_dec = b"".join(chunks).decode(encoding, errors='replace')
+        except LookupError:
+            testo_dec = b"".join(chunks).decode('utf-8', errors='replace')
+        return testo_dec.replace('\x00', ' ')
 
 def is_partita_iva_italiana(cifre):
     if len(cifre) != 11 or not cifre.isdigit():
@@ -181,9 +186,14 @@ def normalizza_telefono_outbound(raw_tel):
         r'(?i)(tel\.?|telefono|phone|centralino|mob\.?|cell\.?|whatsapp)[:\s]*',
         '', str(raw_tel).strip()
     )
-    solo_cifre = re.sub(r'\D', '', t.split('/')[0].split('|')[0])
+    t = t.split('/')[0].split('|')[0].strip()
+    while re.match(r'^(\+39|0039)[\s\.\-]*', t):
+        t = re.sub(r'^(\+39|0039)[\s\.\-]*', '', t).strip()
+    solo_cifre = re.sub(r'\D', '', t)
     if solo_cifre.startswith('0039'):
         solo_cifre = solo_cifre[4:]
+    elif solo_cifre.startswith('390') and len(solo_cifre) >= 10:
+        solo_cifre = solo_cifre[2:]
     elif solo_cifre.startswith('39') and len(solo_cifre) >= 11:
         solo_cifre = solo_cifre[2:]
     if len(solo_cifre) < 8 or len(solo_cifre) > 11:
@@ -362,11 +372,20 @@ def estrai_dominio(testo_url):
     t = testo_url.strip().lower()
     return urlparse(t).netloc.replace('www.', '') if "://" in t else t.split('/')[0].replace('www.', '')
 
+def pulisci_formato_email(e):
+    if not e:
+        return ""
+    return re.sub(r'\s+', '', str(e).strip().lower())
+
 def email_valida(e):
-    if not e or "@" not in e:
+    if not e:
         return False
-    e_low = e.strip().lower()
+    e_low = str(e).strip().lower()
+    if "@" not in e_low or " " in e_low:
+        return False
     if e_low in ("nessuna", "--"):
+        return False
+    if not re.match(r'^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$', e_low):
         return False
     falsi_positivi = (
         'pec@', '@pec', '.pec.', 'legalmail', 'postacert', 'certificata', 'sicurezzapostale',
@@ -400,7 +419,7 @@ def cerca_id_hubspot_contact(dominio, nome_azienda):
 
 def arricchisci_contatto_hubspot_esistente(
     contact_id, url_sito=None, email_generica=None, nome_dm=None, ruolo_dm=None,
-    email_dm=None, settore=None, telefono=None, citta=None, regione=None, sostituisci_piva_tel=False
+    email_dm=None, settore=None, telefono=None, citta=None, regione=None, sostituisci_tel_errato=False
 ):
     if not hubspot_token or not contact_id:
         return "Già in HubSpot"
@@ -433,7 +452,14 @@ def arricchisci_contatto_hubspot_esistente(
         cifre_nuovo = re.sub(r'\D', '', tel_nuovo)
         cifre_att = re.sub(r'\D', '', tel_attuale)
         cifre_att_11 = cifre_att[2:] if cifre_att.startswith('39') and len(cifre_att) == 13 else cifre_att
-        if not tel_attuale or tel_attuale == "--" or sostituisci_piva_tel or is_partita_iva_italiana(cifre_att_11):
+        tel_att_doppio39 = tel_attuale.startswith('+39 390')
+        if (
+            not tel_attuale
+            or tel_attuale == "--"
+            or sostituisci_tel_errato
+            or tel_att_doppio39
+            or is_partita_iva_italiana(cifre_att_11)
+        ):
             aggiornamenti["phone"] = tel_nuovo
         elif cifre_nuovo and cifre_nuovo[-8:] not in cifre_att:
             aggiornamenti["phone"] = f"{tel_attuale} / {tel_nuovo}"
@@ -443,16 +469,15 @@ def arricchisci_contatto_hubspot_esistente(
     lista_add = [e.strip() for e in re.split(r'[;,]', add_attuali_str) if e.strip()]
     tutte_esistenti = set(lista_add + ([email_attuale] if email_attuale else []))
 
-    for e_cand in [email_dm, email_generica]:
+    for e_cand in [pulisci_formato_email(email_dm), pulisci_formato_email(email_generica)]:
         if email_valida(e_cand):
-            ec = e_cand.strip().lower()
-            if ec not in tutte_esistenti:
+            if e_cand not in tutte_esistenti:
                 if not email_attuale:
-                    email_attuale = ec
-                    aggiornamenti["email"] = ec
+                    email_attuale = e_cand
+                    aggiornamenti["email"] = e_cand
                 else:
-                    lista_add.append(ec)
-                tutte_esistenti.add(ec)
+                    lista_add.append(e_cand)
+                tutte_esistenti.add(e_cand)
 
     if lista_add:
         nuova_str_add = ";".join(lista_add)
@@ -503,8 +528,10 @@ def crea_hubspot_contact(
         ruolo = ruolo_dm.upper() if ruolo_dm != "NESSUNO" else ""
         properties["referente"] = f"{nome_dm.upper()} {ruolo}".strip()
 
-    email_primaria = email_dm if email_valida(email_dm) else (email_generica if email_valida(email_generica) else None)
-    email_secondaria = email_generica if (email_primaria == email_dm and email_valida(email_generica)) else None
+    em_dm_clean = pulisci_formato_email(email_dm)
+    em_gen_clean = pulisci_formato_email(email_generica)
+    email_primaria = em_dm_clean if email_valida(em_dm_clean) else (em_gen_clean if email_valida(em_gen_clean) else None)
+    email_secondaria = em_gen_clean if (email_primaria == em_dm_clean and email_valida(em_gen_clean)) else None
     if email_primaria:
         properties["email"] = email_primaria
         if email_secondaria and email_secondaria != email_primaria:
@@ -521,8 +548,8 @@ def crea_hubspot_contact(
         match_id = re.search(r'Existing ID:\s*(\d+)', errore)
         if match_id:
             return arricchisci_contatto_hubspot_esistente(
-                match_id.group(1), url_sito=url_sito, email_generica=email_generica,
-                nome_dm=nome_dm, ruolo_dm=ruolo_dm, email_dm=email_dm,
+                match_id.group(1), url_sito=url_sito, email_generica=em_gen_clean,
+                nome_dm=nome_dm, ruolo_dm=ruolo_dm, email_dm=em_dm_clean,
                 settore=settore, telefono=telefono, citta=citta, regione=regione
             )
         return f"Errore CRM: {errore}"
@@ -589,8 +616,9 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
     headers = {'X-API-KEY': serper_api_key, 'Content-Type': 'application/json'}
 
     dominio_email = dominio
-    if email_valida(email_generica):
-        dom_estratto = email_generica.split("@")[-1].strip().lower()
+    em_gen_clean = pulisci_formato_email(email_generica)
+    if email_valida(em_gen_clean):
+        dom_estratto = em_gen_clean.split("@")[-1].strip().lower()
         provider_gen = {
             'gmail.com', 'libero.it', 'virgilio.it', 'alice.it', 'tin.it', 'tiscali.it',
             'hotmail.com', 'hotmail.it', 'outlook.com', 'outlook.it', 'yahoo.com', 'yahoo.it',
@@ -626,7 +654,7 @@ Individua UN referente reale seguendo questa priorita:
 2. HR: HR Manager, Responsabile Risorse Umane, Talent Acquisition.
 3. Vertice: Amministratore Delegato, Amministratore Unico, CEO, Titolare, Presidente, Socio, Owner.
 ESCLUSIONI: NON selezionare Area Manager, Capo Area, District Manager o Zone Manager. Preferisci sempre il Direttore Commerciale al CEO.
-Costruisci email: nome.cognome@{dominio_email} (minuscolo, senza spazi o accenti).
+Costruisci email: nome.cognome@{dominio_email} (tutto attaccato minuscolo, SENZA SPAZI anche nei doppi nomi, es. gianalberto.rossi@{dominio_email}).
 Rispondi SU UNA SOLA RIGA senza intestazione: NOME COGNOME | RUOLO | EMAIL
 Se assente scrivi SOLO: SCONOSCIUTO | NESSUNO | NESSUNA
 
@@ -639,7 +667,7 @@ Risultati:
         parti = riga_target.split('|')
         nome_dm = parti[0].strip() if len(parti) > 0 else "SCONOSCIUTO"
         ruolo_dm = parti[1].strip() if len(parti) > 1 else "NESSUNO"
-        email_dm = parti[2].strip().lower() if len(parti) > 2 else "NESSUNA"
+        email_dm = pulisci_formato_email(parti[2]) if len(parti) > 2 else "NESSUNA"
         if "SCONOSCIUTO" in nome_dm.upper() or len(nome_dm) < 3 or " " not in nome_dm:
             return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
         return nome_dm, ruolo_dm, email_dm
@@ -664,7 +692,7 @@ def bonifica_link_scartati(worksheet_master, dati):
         time.sleep(1.5)
 
 def integra_referenti_e_telefoni_mancanti(worksheet_assistente, dati_prospect):
-    print("Verifica ultimi 30 contatti in 'Nuovi Prospect' (Referente + Telefono Outbound)...")
+    print("Verifica ultimi 30 contatti in 'Nuovi Prospect' (Referente + Telefono + Errori CRM)...")
     tot_righe = len(dati_prospect)
     for idx in range(max(1, tot_righe - 30), tot_righe):
         if not ha_capacita_gemini():
@@ -673,8 +701,10 @@ def integra_referenti_e_telefoni_mancanti(worksheet_assistente, dati_prospect):
         num_riga_sheet = idx + 1
         nome_az = riga_p[0].strip() if len(riga_p) > 0 else ""
         url_az = riga_p[1].strip() if len(riga_p) > 1 else ""
-        email_az = riga_p[5].strip().lower() if len(riga_p) > 5 else ""
+        stato_crm_att = riga_p[4].strip() if len(riga_p) > 4 else ""
+        email_az = pulisci_formato_email(riga_p[5]) if len(riga_p) > 5 else ""
         referente_att = riga_p[6].strip() if len(riga_p) > 6 else ""
+        email_ref_att_raw = riga_p[7].strip() if len(riga_p) > 7 else ""
         telefono_att = riga_p[9].strip() if len(riga_p) > 9 else ""
 
         if not nome_az or not url_az:
@@ -683,12 +713,41 @@ def integra_referenti_e_telefoni_mancanti(worksheet_assistente, dati_prospect):
         if any(agg in dominio_az for agg in AGGREGATORI_DA_BLOCCARE):
             continue
 
+        email_ref_pulita = pulisci_formato_email(email_ref_att_raw)
+        if " " in email_ref_att_raw and email_valida(email_ref_pulita):
+            worksheet_assistente.update(values=[[email_ref_pulita]], range_name=f"H{num_riga_sheet}")
+            print(f"Email referente corretta (rimosso spazio) per {nome_az}: {email_ref_pulita}")
+
         cifre_att = re.sub(r'\D', '', telefono_att)
         if cifre_att.startswith('39') and len(cifre_att) == 13:
             cifre_att = cifre_att[2:]
         era_piva = is_partita_iva_italiana(cifre_att)
+        era_doppio39 = telefono_att.startswith('+39 390')
         manca_ref = (not referente_att)
-        manca_tel = (not telefono_att or telefono_att == "--" or era_piva)
+        manca_tel = (not telefono_att or telefono_att == "--" or era_piva or era_doppio39)
+
+        tel_corretto = normalizza_telefono_outbound(telefono_att) if not era_piva else "--"
+
+        if era_doppio39 and tel_corretto != "--":
+            worksheet_assistente.update(values=[[tel_corretto]], range_name=f"J{num_riga_sheet}")
+            print(f"Prefisso +39 duplicato corretto per {nome_az}: {tel_corretto}")
+            manca_tel = False
+            contact_id_fix = cerca_id_hubspot_contact(dominio_az, nome_az)
+            if contact_id_fix:
+                arricchisci_contatto_hubspot_esistente(
+                    contact_id_fix, telefono=tel_corretto, sostituisci_tel_errato=True
+                )
+
+        if stato_crm_att.startswith("Errore CRM"):
+            nuovo_stato = crea_hubspot_contact(
+                nome_az, url_az, email_az,
+                referente_att if referente_att != "--" else "SCONOSCIUTO",
+                "NESSUNO", email_ref_pulita, "--",
+                tel_corretto, "--", "--"
+            )
+            if not nuovo_stato.startswith("Errore CRM"):
+                worksheet_assistente.update(values=[[nuovo_stato]], range_name=f"E{num_riga_sheet}")
+                print(f"Recuperato contatto su HubSpot per {nome_az}: {nuovo_stato}")
 
         if manca_ref or manca_tel:
             nome_dm, ruolo_dm, email_dm = "SCONOSCIUTO", "NESSUNO", "NESSUNA"
@@ -729,7 +788,7 @@ def integra_referenti_e_telefoni_mancanti(worksheet_assistente, dati_prospect):
                         contact_id, url_sito=url_az, email_generica=email_az,
                         nome_dm=nome_dm, ruolo_dm=ruolo_dm,
                         email_dm=(email_dm if email_valida(email_dm) else None),
-                        telefono=tel_trovato, sostituisci_piva_tel=era_piva
+                        telefono=tel_trovato, sostituisci_tel_errato=(era_piva or era_doppio39)
                     )
             time.sleep(1.0)
 
@@ -832,8 +891,8 @@ Estrai 7 campi separati da |:
 1. ESITO: Scrivi UNICAMENTE una di queste tre parole esatte: AGENTE oppure DIPENDENTE oppure ESCLUSO.
 Scrivi AGENTE SOLO se la pagina appartiene al sito ufficiale di un'azienda italiana/operante in Italia e contiene un annuncio o invito ESPLICITO a candidarsi per diventare Agente di Commercio, Rappresentante, Venditore a P.IVA o Procacciatore.
 Scrivi ESCLUSO se:
-- Non e il sito ufficiale dell'azienda mandante (portali annunci, directory, blog, studi legali/commercialisti, associazioni).
-- Homepage, Chi siamo, Prodotti, News o Contatti senza ricerca aperta di agenti/venditori.
+- Non e il sito ufficiale dell'azienda mandante (portali annunci, directory, blog, studi legali/commercialisti, associazioni, universita/scuole).
+- Homepage, Chi siamo, Prodotti, News, Privacy/Cookie o Contatti senza ricerca aperta di agenti/venditori.
 - Parla di Agenti AI / Intelligenza Artificiale.
 - Produttori esteri senza sede in Italia o multinazionali quotate (cerchiamo solo PMI italiane).
 - Pagina Rete vendita/Distributori per clienti finali senza selezione agenti.
@@ -857,7 +916,7 @@ Testo: {testo}"""
                 parti = parse_risposta_sito(testo_risposta) or ["ESCLUSO", "SCONOSCIUTO", "NESSUNA", "--", "--", "--", "--"]
 
                 esito, nome_reale = parti[0], parti[1].strip()
-                email = parti[2].strip().lower()
+                email = pulisci_formato_email(parti[2])
                 if not email_valida(email):
                     email = email_suggerita if email_valida(email_suggerita) else "NESSUNA"
                 settore = parti[3].strip()
