@@ -3,6 +3,7 @@ import sys
 import json
 import random
 import time
+import re
 import requests
 import gspread
 from urllib.parse import urlparse
@@ -47,20 +48,24 @@ azioni = [
     '"agenti monomandatari"',
     '"ricerca rappresentanti"',
     '"ricerca procacciatori"',
-    '"ampliamento rete vendita" "agenti"',
-    '"mandato di agenzia" ("lavora con noi" OR "candidatura" OR "ricerca")',
-    '"inquadramento enasarco" ("lavora" OR "ricerca" OR "selezioniamo")',
-    '"venditori a partita iva" OR "commerciali p.iva"',
+    '"ampliamento rete vendita"',
+    '"mandato di agenzia" "lavora con noi"',
+    '"inquadramento enasarco"',
+    '"venditori a partita iva"',
+    '"commerciali p.iva"',
     '"tecnico commerciale" "enasarco"',
-    '"agente plurimandatario" ("cerchiamo" OR "selezioniamo" OR "ricerca")',
-    '"potenziamento rete vendita" ("agenti" OR "venditori")',
-    '"inserimento agenti" OR "inserimento rappresentanti"',
-    'inurl:lavora-con-noi ("agenti" OR "enasarco" OR "plurimandatari")',
-    'inurl:collabora-con-noi ("agenti" OR "venditori" OR "commerciali")',
-    'inurl:ricerca-agenti OR inurl:diventa-agente',
-    'inurl:posizioni-aperte ("agente" OR "agenti" OR "enasarco")',
-    'intitle:"lavora con noi" ("agenti" OR "rappresentanti")',
-    'intitle:"ricerca agenti" OR intitle:"cerchiamo agenti"'
+    '"agente plurimandatario"',
+    '"potenziamento rete vendita"',
+    '"inserimento agenti"',
+    'inurl:lavora-con-noi "agenti"',
+    'inurl:lavora-con-noi "enasarco"',
+    'inurl:collabora-con-noi "agenti"',
+    'inurl:ricerca-agenti',
+    'inurl:diventa-agente',
+    'inurl:posizioni-aperte "agente"',
+    'intitle:"lavora con noi" "agenti"',
+    'intitle:"ricerca agenti"',
+    'intitle:"cerchiamo agenti"'
 ]
 
 settori = [
@@ -72,24 +77,23 @@ settori = [
     "forniture industriali", "macchinari", "oleodinamica", "elettrotecnica",
     "carpenteria", "stampaggio", "automazione industriale", "detergenza",
     "estetica professionale", "ricambi", "componentistica", "bevande", "vini",
-    "medical devices", "ortopedia", "cartotecnica", "etichettificio", "vernici",
+    "dispositivi medici", "ortopedia", "cartotecnica", "etichettificio", "vernici",
     "imballaggi", "refrigerazione", "climatizzazione", "pneumatica", "valvole",
     "rubinetteria", "ceramiche", "pavimenti", "rivestimenti", "isolanti",
     "colorificio", "adesivi", "sigillanti", "abrasivi", "saldatura",
     "compressori", "carrelli elevatori", "scaffalature", "arredo bagno",
-    "arredo ufficio", "contract", "forniture alberghiere", "ristorazione collettiva",
+    "arredo ufficio", "contract", "forniture alberghiere", "ristorazione",
     "surgelati", "panificazione", "pasticceria", "caffe", "torrefazione",
-    "integratori", "nutraceutica", "farmaceutico", "dentale", "odontoiatrico",
-    "veterinaria", "pet food", "zootecnia", "fertilizzanti", "sementi",
+    "integratori", "nutraceutica", "farmaceutico", "forniture dentali",
+    "prodotti veterinari", "pet food", "zootecnia", "fertilizzanti", "sementi",
     "enologia", "oleificio", "conserve", "salumificio", "caseificio",
     "tessile", "abbigliamento da lavoro", "calzaturificio", "pelletteria",
     "occhialeria", "galvanica", "fonderia", "torneria", "lavorazioni meccaniche",
     "lamiere", "profilati", "alluminio", "acciaio", "materie plastiche",
     "gomma", "guarnizioni", "cavi elettrici", "quadri elettrici", "sensoristica",
     "strumentazione", "laboratorio", "depurazione", "trattamento acque",
-    "ecologia", "smaltimento rifiuti", "antincendio", "videosorveglianza",
-    "controllo accessi", "gestionale", "erp", "cybersecurity", "stampa digitale",
-    "flessografia", "litografia", "espositori", "visual merchandising"
+    "ecologia", "antincendio", "videosorveglianza", "controllo accessi",
+    "gestionale", "erp", "stampa digitale", "flessografia", "espositori"
 ]
 
 province = [
@@ -101,122 +105,145 @@ province = [
     "Terni", "Arezzo", "Lucca", "Pisa", "Prato", "Pistoia", "Siena", "Genova",
     "Alessandria", "Asti", "Biella", "Vercelli", "Pavia", "Lodi", "Sondrio",
     "Trento", "Bolzano", "Belluno", "Rovigo", "Venezia", "Trieste", "Gorizia",
-    "Pescara", "Chieti", "Teramo", "L'Aquila", "Latina", "Frosinone", "Viterbo",
-    "Caserta", "Salerno", "Avellino", "Benevento", "Foggia", "Barletta", "Taranto",
-    "Brindisi", "Lecce", "Catania", "Palermo", "Messina", "Ragusa", "Siracusa",
-    "Cagliari", "Sassari", "Lombardia", "Veneto", "Emilia Romagna", "Piemonte",
-    "Toscana", "Marche", "Friuli", "Puglia", "Campania", "Sicilia", "Abruzzo", "Umbria"
+    "Pescara", "Chieti", "Teramo", "Latina", "Frosinone", "Viterbo", "Caserta",
+    "Salerno", "Avellino", "Benevento", "Foggia", "Barletta", "Taranto", "Brindisi",
+    "Lecce", "Catania", "Palermo", "Messina", "Ragusa", "Siracusa", "Cagliari",
+    "Sassari", "Lombardia", "Veneto", "Emilia Romagna", "Piemonte", "Toscana",
+    "Marche", "Friuli", "Puglia", "Campania", "Sicilia", "Abruzzo", "Umbria"
 ]
 
-siti_da_escludere = [
-    'indeed', 'infojobs', 'linkedin', 'subito', 'cercoagente', 'venditori',
-    'bakeca', 'glassdoor', 'jooble', 'monster', 'wikihow', 'wikipedia', 'youtube',
-    'lavoro.it', 'jobeka', 'applavoro', 'jobsora', 'rappresentanti', 'startup.jobs',
-    'jobijoba', 'trabajo', 'gigroup', 'randstad', 'grafton', 'adecco', 'manpower',
-    'generazionevincente', 'trovolavoro', 'corriere', 'annunci', 'bancalavoro',
-    'jobgratis', 'cornerjob', 'aliagenzia', 'synergie', 'pagepersonnel',
-    'michaelpage', 'hays', 'quojobis', 'orienta', 'maw.it', 'inhrgroup', 'careerjet',
-    'impiego24', 'lavorofacile', 'ialweb', 'bachecalavoro', 'jobrapido', 'cercolavoro',
-    'simplyhired', 'altamiraweb', 'inrecruiting', 'niuma', 'cving', 'talent', 'metis',
-    'agentscout', 'jobleads', 'whatjobs', 'cercoagenti', 'federagenti', 'camcom', 'ascom',
-    'kijiji', 'mitula', 'neuvoo', 'adzuna', 'trovit', 'tuolavoro', 'fashionjobs',
-    'risorse.it', 'lifein', 'instagram', 'facebook', 'tiktok', 'bancaclv',
-    'agenti.com', 'lavoropiu', 'jobbydoo', 'areajob', 'clickajobs', 'jobsavior',
-    'tuoagente', 'ilcommerciale', 'ucv.online', 'guru.jobs', 'enasarco.it',
-    'fnaarc', 'usarci', 'unimpiego', 'fiscozen', 'assolombarda', 'regione.',
-    'agentitreviso', 'inmatch', 'allibo', 'cgil', 'cisl', 'uil', 'confcommercio',
-    'jobiri', 'livecareer', 'onlinecv', 'modelli-di-curriculum', 'ticonsiglio',
-    'hrspecialistitalia', 'profiliecarriere', 'samsic-hr', 'lavorai', 'joinrs',
-    'intervieweb', 'provincia.', 'giurcost', 'esselungajob',
-    'nettowork', 'bebee', 'umana', 'studiostella', 'studiogiudice',
-    'saviglianoformazione', 'comune.', 'business.telecomitalia.it',
-    'expertini', 'lavoroeconcorsi', 'jobssjob', 'recruit.net', 'agentworkhub',
-    'teamtailor', 'oraclecloud', 'carusihr', 'confartigianato', 'confindustria',
-    'cna.it', 'casa.it', 'immobiliare', 'tecnocasa', 'tempocasa', 'gabetti',
-    'remax', 'toscano.it', 'engelvoelkers', 'paginebianche', 'paginegialle',
-    'verisure', 'venditoriadistanza', 'x.com', 'twitter.com', '.blog/',
-    'commercialagents-italy', 'just.it', 'reddit.com', 'calameo.com', 'faciletrovare',
-    'atoka.io', 'empresite', 'pornhub', 'xhamster', 'bokep', 'porndig', 'assinews',
-    'realemutua', 'groupama', 'unipol', 'allianz', 'generali', 'grandiscuole.it',
-    'cepulavoro', 'issuu.com', 'archive.org', 'gowork.it', 'casagenti.it', 'vorwerk.com',
-    'studocu.com', 'halleyweb.com', 'mondobirra.org', 'manstar', 'kompass',
-    'europages', 'informazione-aziende', 'ufficiocamerale', 'fatturatoitalia',
-    'signalhire', 'rocketreach', 'zoominfo', 'dnb.com', 'crunchbase',
-    '.edu.it', '.gov.it', '.unibo.it', 'aulab.it', 'radiogold.it', 'foodcareer.it',
-    'lavoraconnoi.com', 'gazzettadellavoro.com', 'globelife.com',
-    '360forma.com', 'xing.com', 'academia.edu', 'professioneagente.it', 'go2sales.it',
-    'tutto626.it', 'claude.com', 'job4italy.com', 'trendsrl.net', 'profili.it',
-    'gesacom.it', 'federprivacy.org', 'affida.credit', 'credipass.it',
-    'sellapersonalcredit.it', 'vivienergia.it', 'trasparenza-valutazione-merito.it',
-    'jimdoweb.com', 'webnode.it', 'webnode.page', 'wixsite.com', 'altervista.org',
-    'made-in-china.com', 'alibaba.com', 'agriaffaires.', 'machineryzone.',
-    'noleggiamoauto.it', 'senato.it', 'virgilio.it', 'leggo.it', 'mattinopadova.it',
-    'elledecor.com', 'github.com', 'infobel.com', 'openedition.org', 'legambiente.it',
-    'ny.gov', 'unito.it', 'agent321.', 'freshplaza.it', 'ricercaimprese.com',
-    'partitaiva24.it', 'italiaatavola.net', 'informazionesenzafiltro.it',
-    'eventipress.com', 'studiolegale', 'avvocato', 'commercialista', 'consulentedellavoro',
+# Controllato SOLO sul dominio (netloc), mai sul percorso interno dell'URL
+domini_da_escludere = (
+    'indeed.', 'infojobs.', 'linkedin.', 'subito.', 'cercoagente.', 'venditori.it',
+    'venditori.com', 'bakeca.', 'glassdoor.', 'jooble.', 'monster.', 'wikihow.',
+    'wikipedia.', 'youtube.', 'lavoro.it', 'jobeka.', 'applavoro.', 'jobsora.',
+    'rappresentanti.it', 'startup.jobs', 'jobijoba.', 'trabajo.', 'gigroup.',
+    'randstad.', 'grafton.', 'adecco.', 'manpower.', 'generazionevincente.',
+    'trovolavoro.', 'corriere.', 'annunci.it', 'bancalavoro.', 'jobgratis.',
+    'cornerjob.', 'aliagenzia.', 'synergie-', 'pagepersonnel.', 'michaelpage.',
+    'hays.', 'quojobis.', 'orienta.net', 'maw.it', 'inhrgroup.', 'careerjet.',
+    'impiego24.', 'lavorofacile.', 'ialweb.', 'bachecalavoro.', 'jobrapido.',
+    'cercolavoro.', 'simplyhired.', 'altamiraweb.', 'inrecruiting.', 'niuma.',
+    'cving.', 'talent.com', 'openjobmetis.', 'agentscout.', 'jobleads.',
+    'whatjobs.', 'cercoagenti.', 'federagenti.', 'camcom.', 'ascom.', 'kijiji.',
+    'mitula.', 'neuvoo.', 'adzuna.', 'trovit.', 'tuolavoro.', 'fashionjobs.',
+    'fashionjob.it', 'risorse.it', 'lifein.', 'instagram.', 'facebook.', 'tiktok.',
+    'bancaclv.', 'agenti.com', 'lavoropiu.', 'jobbydoo.', 'areajob.', 'clickajobs.',
+    'jobsavior.', 'tuoagente.', 'ilcommerciale.', 'ucv.online', 'guru.jobs',
+    'enasarco.it', 'fnaarc.', 'usarci.', 'unimpiego.', 'fiscozen.', 'assolombarda.',
+    'regione.', 'provincia.', 'comune.', 'agentitreviso.', 'inmatch.', 'allibo.',
+    'cgil.', 'cisl.', 'uil.', 'confcommercio.', 'confartigianato.', 'confindustria.',
+    'cna.it', 'jobiri.', 'livecareer.', 'onlinecv.', 'modelli-di-curriculum.',
+    'ticonsiglio.', 'hrspecialistitalia.', 'profiliecarriere.', 'samsic-hr.',
+    'lavorai.', 'joinrs.', 'intervieweb.', 'giurcost.', 'esselungajob.',
+    'nettowork.', 'bebee.', 'umana.it', 'studiostella.', 'studiogiudice.',
+    'saviglianoformazione.', 'telecomitalia.', 'expertini.', 'lavoroeconcorsi.',
+    'jobssjob.', 'recruit.net', 'agentworkhub.', 'teamtailor.', 'oraclecloud.',
+    'carusihr.', 'casa.it', 'immobiliare.', 'tecnocasa.', 'tempocasa.', 'gabetti.',
+    'remax.', 'toscano.it', 'engelvoelkers.', 'paginebianche.', 'paginegialle.',
+    'verisure.', 'venditoriadistanza.', 'x.com', 'twitter.com', 'just.it',
+    'reddit.com', 'calameo.com', 'faciletrovare.', 'atoka.io', 'empresite.',
+    'pornhub.', 'xhamster.', 'bokep', 'porndig.', 'assinews.', 'realemutua.',
+    'groupama.', 'unipol', 'allianz.', 'generali.', 'grandiscuole.it',
+    'cepulavoro.', 'issuu.com', 'archive.org', 'gowork.it', 'casagenti.it',
+    'vorwerk.com', 'studocu.com', 'halleyweb.com', 'mondobirra.org', 'manstar',
+    'kompass', 'europages', 'informazione-aziende', 'ufficiocamerale',
+    'fatturatoitalia', 'signalhire', 'rocketreach', 'zoominfo', 'dnb.com',
+    'crunchbase', '.edu.it', '.gov.it', 'unibo.it', 'unito.it', 'uniroma',
+    'polimi.it', 'aulab.it', 'radiogold.it', 'foodcareer.it', 'lavoraconnoi.com',
+    'gazzettadellavoro.com', 'globelife.com', '360forma.com', 'xing.com',
+    'academia.edu', 'professioneagente.it', 'go2sales.it', 'tutto626.it',
+    'claude.com', 'job4italy.com', 'trendsrl.net', 'profili.it', 'gesacom.it',
+    'federprivacy.org', 'affida.credit', 'credipass.it', 'sellapersonalcredit.it',
+    'vivienergia.it', 'jimdoweb.com', 'webnode.it', 'webnode.page', 'wixsite.com',
+    'altervista.org', 'made-in-china.com', 'alibaba.com', 'agriaffaires.',
+    'machineryzone.', 'noleggiamoauto.it', 'senato.it', 'virgilio.it', 'leggo.it',
+    'mattinopadova.it', 'elledecor.com', 'github.com', 'infobel.com',
+    'openedition.org', 'legambiente.it', 'ny.gov', 'agent321.', 'freshplaza.it',
+    'ricercaimprese.com', 'partitaiva24.it', 'italiaatavola.net',
+    'informazionesenzafiltro.it', 'eventipress.com', 'studiolegale', 'avvocato',
+    'commercialista', 'consulentedellavoro', 'studiodentistico', 'dentista',
+    'clinicaveterinaria', 'veterinari', 'farmacia', 'parafarmacia',
     'gdonews.it', 'infowine.com', 'mecspe.com', 'wewelfare.it', 'repubblica.it',
-    'ilsole24ore.com', 'milano.zone', 'today.it', 'fanpage.it', 'ansa.it', 'adnkronos.com'
-]
+    'ilsole24ore.com', 'milano.zone', 'today.it', 'fanpage.it', 'ansa.it',
+    'adnkronos.com', 'art-er.it', 'clust-er.it', 'pharmapoint.it', 'benetton.com'
+)
 
-path_da_escludere = [
-    '/sitemap', '/blog/', '/news/', '/notizie/', '/category/', '/tag/', '/author/',
-    '/articolo/', '/articoli/', '/economia/', '/cronaca/', '/politica/', '/elezioni/',
-    '/storia-', '/incontri', '/cookie-policy', '/privacy-policy', '/cookie', '/privacy',
-    '/global/', '/corporate/', '/investors/', 'careers.', 'jobs.', '/prodotti/',
-    '/product/', '/shop/', '/carrello', '/checkout', '/portfolio/', '/case-study/',
-    '/caso-studio/', '/punti-vendita', '/trova-rivendit', '/rivenditori', '/account/',
+# Controllato SOLO sul path dell'URL (sblocca /azienda/, /company/, /corporate/, careers.)
+path_da_escludere = (
+    '/sitemap', '/category/', '/tag/', '/author/', '/economia/', '/cronaca/',
+    '/politica/', '/elezioni/', '/incontri', '/cookie-policy', '/privacy-policy',
+    '/cookie', '/privacy', '/termini-e-condizioni', '/condizioni-di-vendita',
+    '/investors/', '/shop/', '/carrello', '/checkout', '/product/', '/products/',
+    '/catalogo/', '/case-study/', '/caso-studio/', '/punti-vendita',
+    '/trova-rivendit', '/rivenditori', '/account/', '/login', '/register',
     '/magazine/', '/eventi/', '/evento/', '/fiere/', '/normativa', '/aliquote',
     '/calcolo-', '/guida-', '/come-diventare', '/chi-e-l-agente',
-    '/companies/', '/company/', '/aziende/', '/azienda/', '/directory/', '/profile/'
-]
+    '/companies/', '/aziende/', '/directory/'
+)
+
+TLD_ESTERI_DA_BLOCCARE = (
+    '.cn', '.ae', '.ru', '.in', '.tr', '.pl', '.ro', '.br', '.mx', '.uk', '.us', '.gov', '.edu'
+)
 
 def estrai_dominio(testo_url):
     if not testo_url:
         return ""
     t = testo_url.strip().lower()
     if "://" in t:
-        return urlparse(t).netloc.replace('www.', '')
-    return t.split('/')[0].replace('www.', '')
+        netloc = urlparse(t).netloc
+    else:
+        netloc = t.split('/')[0]
+    netloc = netloc.split(':')[0]
+    return re.sub(r'^(www\d*\.|it\.|careers\.|jobs\.|lavoro\.)', '', netloc)
 
 def ha_segnali_reali_ricerca_agenti(titolo, snippet, link):
     testo_completo = f"{titolo} {snippet} {link}".lower()
 
-    esclusioni_semantiche = (
-        'agenti ai', 'agente ai', 'agenti ia', 'agenti digitali', 'agentic',
-        'intelligenza artificiale', 'agenti patogeni', 'agenti chimici',
-        'agenti cancerogeni', 'agenti atmosferici', 'agenti fisici',
-        'agenti immobiliari', 'agente immobiliare', 'mediazione creditizia',
-        'agente in attivita finanziaria', 'agente assicurativo', 'subagente',
-        'aliquote enasarco', 'calcolo enasarco', 'aprire partita iva',
-        'codice ateco', 'concorso pubblico', 'agenti di polizia', 'agenti municipali',
-        'elezioni', 'candidato sindaco', 'liste a sostegno', 'cookie policy', 'informativa privacy'
+    # Esclusioni con confini di parola (\b) per non bloccare mai parole valide come 'selezioniamo'
+    pattern_esclusioni = (
+        r'\b(agenti\s+ai|agente\s+ai|agenti\s+ia|agenti\s+digitali|agentic|'
+        r'intelligenza\s+artificiale|agenti\s+patogeni|agenti\s+chimici|'
+        r'agenti\s+cancerogeni|agenti\s+atmosferici|agenti\s+fisici|'
+        r'agenti\s+sbiancanti|agente\s+sbiancante|agenti\s+infettivi|'
+        r'agenti\s+addensanti|agenti\s+pulenti|agenti\s+esterni|'
+        r'agenti\s+immobiliari|agente\s+immobiliare|mediazione\s+creditizia|'
+        r'agente\s+in\s+attivit[aà]\s+finanziaria|agente\s+assicurativo|subagente|'
+        r'aliquote\s+enasarco|calcolo\s+enasarco|aprire\s+partita\s+iva|'
+        r'codice\s+ateco|concorso\s+pubblico|agenti\s+di\s+polizia|agenti\s+municipali|'
+        r'sindacato\s+autonomo\s+di\s+polizia|elezioni\s+comunali|elezioni\s+regionali|'
+        r'candidato\s+sindaco|liste\s+a\s+sostegno|cookie\s+policy|informativa\s+privacy|'
+        r'aggiungi\s+al\s+carrello|spedizione\s+gratuita|sbiancamento\s+dentale)\b'
     )
-    if any(escl in testo_completo for escl in esclusioni_semantiche):
+    if re.search(pattern_esclusioni, testo_completo):
         return False
 
-    parole_target = (
-        'agent', 'rappresentant', 'procacciat', 'vendit',
-        'commercial', 'plurimandat', 'monomandat', 'enasarco'
+    pattern_ruolo = (
+        r'\b(agente|agenti|rappresentante|rappresentanti|procacciatore|procacciatori|'
+        r'plurimandatario|plurimandatari|monomandatario|monomandatari|enasarco|'
+        r'venditore|venditori|rete[\s\-]+vendita|forza[\s\-]+vendita|sales[\s\-]+agent)\b'
     )
-    if not any(pt in testo_completo for pt in parole_target):
+    if not re.search(pattern_ruolo, testo_completo):
         return False
 
-    segnali_selezione = (
-        'lavora', 'job', 'carriere', 'careers', 'cerchiamo', 'cercasi',
-        'ricerca', 'ricerchiamo', 'selezion', 'candidatura', 'candidati',
-        'invia', 'curriculum', 'diventa', 'collabora', 'posizion', 'opportunit',
-        'ampliamento', 'potenziamento', 'inserimento', 'plurimandat',
-        'monomandat', 'enasarco', 'mandato'
+    pattern_selezione = (
+        r'(lavora[\s\-]+con[\s\-]+noi|lavoraconnoi|collabora[\s\-]+con[\s\-]+noi|'
+        r'cerchiamo|cercasi|ricerca[\s\-]+agent|ricerca[\s\-]+rappresentant|'
+        r'ricerca[\s\-]+vendit|ricerchiamo|selezioniamo|selezione[\s\-]+agent|'
+        r'candidatura|candidati|invia[\s\-]+il[\s\-]+cv|invia[\s\-]+curriculum|'
+        r'curriculum|diventa[\s\-]+agente|diventa[\s\-]+nostro|posizioni[\s\-]+aperte|'
+        r'opportunit[aà][\s\-]+di[\s\-]+lavoro|opportunit[aà][\s\-]+professional|'
+        r'carriere|careers|ampliamento[\s\-]+rete|potenziamento[\s\-]+rete|'
+        r'mandato[\s\-]+di[\s\-]+agenzia|inquadramento[\s\-]+enasarco)'
     )
-    if not any(ss in testo_completo for ss in segnali_selezione):
+    if not re.search(pattern_selezione, testo_completo):
         return False
 
     return True
 
 def main():
     TARGET_NUOVI_ANNUNCI = 120
-    MAX_QUERIES = 115
+    MAX_QUERIES = 125
 
     colonna_b_master = worksheet.col_values(2)
     colonna_b_prospect = worksheet_prospect.col_values(2)
@@ -233,18 +260,22 @@ def main():
     dati_da_inserire = []
     combinazioni_usate = set()
 
+    esclusioni_q = '-immobiliare -assicurazioni -luce -gas -subito -indeed -linkedin -"agenti ai"'
+
     for idx_q in range(1, MAX_QUERIES + 1):
         azione = random.choice(azioni)
         settore = random.choice(settori)
         provincia = random.choice(province)
         pagina = random.choice([1, 1, 1, 2])
 
-        modalita = random.choice([1, 2, 3, 4])
+        modalita = random.choice([1, 2, 3, 4, 5])
         if modalita == 1:
             query_base = f'{azione} {settore}'
         elif modalita == 2:
-            query_base = f'{azione} {settore} {provincia}'
+            query_base = f'{azione} {provincia}'
         elif modalita == 3:
+            query_base = f'{azione} {settore} {provincia}'
+        elif modalita == 4:
             query_base = f'{azione} {provincia} (srl OR spa)'
         else:
             query_base = f'site:.it {azione} {settore}'
@@ -254,10 +285,6 @@ def main():
             continue
         combinazioni_usate.add(chiave_combo)
 
-        esclusioni_q = (
-            '-immobiliare -assicurazioni -finanziaria -luce -gas -energia '
-            '-franchising -concorso -subito -indeed -linkedin -"agenti ai"'
-        )
         query = f'{query_base} {esclusioni_q}'
         print(f"[{idx_q}/{MAX_QUERIES}] Query (Pag. {pagina}): {query}")
 
@@ -293,7 +320,7 @@ def main():
 
             risultati = data.get('organic', [])
             if not risultati:
-                time.sleep(0.8)
+                time.sleep(0.7)
                 continue
 
             for item in risultati:
@@ -305,29 +332,28 @@ def main():
                 if not link or link.endswith(('.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.zip')):
                     continue
 
-                titolo_lower = titolo.lower()
-                parole_ban_titolo = (
-                    'immobiliare', 'incontri', 'cerco ragazza', 'trans ', 'concorso pubblico',
-                    'multinazionale', 'bokep', 'porn', 'agenti ai', 'intelligenza artificiale',
-                    'calcolo enasarco', 'aliquote enasarco', 'aprire partita iva',
-                    'cookie policy', 'privacy policy', 'candidato sindaco'
-                )
-                if any(p in titolo_lower for p in parole_ban_titolo):
-                    continue
+                parsed_url = urlparse(link)
+                netloc_raw = parsed_url.netloc.split(':')[0]
+                path_url = parsed_url.path or '/'
 
-                if any(path_vietato in link for path_vietato in path_da_escludere):
-                    continue
-
-                if not ha_segnali_reali_ricerca_agenti(titolo, snippet, link):
+                if netloc_raw.endswith(TLD_ESTERI_DA_BLOCCARE):
                     continue
 
                 dominio_estratto = estrai_dominio(link)
                 if not dominio_estratto or dominio_estratto in domini_inseriti:
                     continue
 
-                if not any(sito_vietato in link for sito_vietato in siti_da_escludere):
-                    dati_da_inserire.append([titolo, link_originale])
-                    domini_inseriti.add(dominio_estratto)
+                if any(dom_vietato in netloc_raw for dom_vietato in domini_da_escludere):
+                    continue
+
+                if any(path_vietato in path_url for path_vietato in path_da_escludere):
+                    continue
+
+                if not ha_segnali_reali_ricerca_agenti(titolo, snippet, link):
+                    continue
+
+                dati_da_inserire.append([titolo, link_originale])
+                domini_inseriti.add(dominio_estratto)
 
                 if len(dati_da_inserire) >= TARGET_NUOVI_ANNUNCI:
                     break
@@ -340,7 +366,7 @@ def main():
         if len(dati_da_inserire) >= TARGET_NUOVI_ANNUNCI:
             break
 
-        time.sleep(0.9)
+        time.sleep(0.8)
 
     if dati_da_inserire:
         try:
