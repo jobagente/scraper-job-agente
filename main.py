@@ -107,6 +107,19 @@ PAROLE_CHIAVE_AGENTE = (
     'partita iva', 'rete vendita', 'sales', 'mandat', 'provvigion'
 )
 
+PROVIDER_EMAIL_PERSONALI = {
+    'gmail.com', 'googlemail.com', 'libero.it', 'virgilio.it', 'alice.it',
+    'tin.it', 'tiscali.it', 'hotmail.com', 'hotmail.it', 'outlook.com',
+    'outlook.it', 'live.com', 'live.it', 'msn.com', 'yahoo.com', 'yahoo.it',
+    'icloud.com', 'me.com', 'mac.com', 'fastwebnet.it', 'inwind.it', 'blu.it',
+    'tim.it', 'vodafone.it', 'teletu.it', 'email.it', 'posta.it', 'gmx.com',
+    'gmx.it', 'protonmail.com', 'proton.me', 'aol.com', 'azienda.it',
+    'dominio.it', 'esempio.it', 'example.com', 'info.com', 'info.it',
+    'test.it', 'pcert.it', 'arubapec.it', 'legalmail.it', 'pec.it',
+    'postecert.it', 'manstar.org', 'xing.com', 'jimdoweb.com', 'webnode.it',
+    'webnode.page'
+}
+
 MAPPA_PROVINCE_REGIONI = {
     'AG': 'SICILIA', 'AL': 'PIEMONTE', 'AN': 'MARCHE', 'AO': "VALLE D'AOSTA",
     'AR': 'TOSCANA', 'AP': 'MARCHE', 'AT': 'PIEMONTE', 'AV': 'CAMPANIA',
@@ -393,6 +406,20 @@ def pulisci_formato_email(e):
         return ""
     return re.sub(r'\s+', '', str(e).strip().lower())
 
+def dominio_aziendale_per_referente(dominio_sito, email_generica):
+    """Determina il vero dominio aziendale per costruire l'email del referente, scartando provider personali (es. me.com, gmail)."""
+    em_clean = pulisci_formato_email(email_generica)
+    if email_valida(em_clean):
+        dom_estratto = em_clean.split("@")[-1].strip().lower()
+        escl_d = ('pec', 'cert', 'legalmail', 'jimdo', 'webnode', 'wixsite', 'altervista')
+        if (
+            dom_estratto
+            and dom_estratto not in PROVIDER_EMAIL_PERSONALI
+            and not any(p in dom_estratto for p in escl_d)
+        ):
+            return dom_estratto
+    return dominio_sito
+
 def email_valida(e):
     if not e:
         return False
@@ -436,7 +463,7 @@ def cerca_id_hubspot_contact(dominio, nome_azienda):
 def arricchisci_contatto_hubspot_esistente(
     contact_id, url_sito=None, email_generica=None, nome_dm=None, ruolo_dm=None,
     email_dm=None, settore=None, telefono=None, citta=None, regione=None,
-    sostituisci_tel_errato=False, nome_azienda_pulito=None
+    sostituisci_tel_errato=False, nome_azienda_pulito=None, email_errata_da_sostituire=None
 ):
     if not hubspot_token or not contact_id:
         return "Già in HubSpot"
@@ -492,9 +519,19 @@ def arricchisci_contatto_hubspot_esistente(
     email_attuale = (props_attuali.get("email") or "").strip().lower()
     add_attuali_str = (props_attuali.get("hs_additional_emails") or "").strip().lower()
     lista_add = [e.strip() for e in re.split(r'[;,]', add_attuali_str) if e.strip()]
+
+    # Se l'email primaria su HubSpot era costruita per errore su dominio personale (es. fabio.frigato@me.com), la sostituisce
+    em_err_low = pulisci_formato_email(email_errata_da_sostituire)
+    em_dm_low = pulisci_formato_email(email_dm)
+    if em_err_low and email_attuale == em_err_low and email_valida(em_dm_low):
+        email_attuale = em_dm_low
+        aggiornamenti["email"] = em_dm_low
+    if em_err_low and em_err_low in lista_add:
+        lista_add = [e for e in lista_add if e != em_err_low]
+
     tutte_esistenti = set(lista_add + ([email_attuale] if email_attuale else []))
 
-    for e_cand in [pulisci_formato_email(email_dm), pulisci_formato_email(email_generica)]:
+    for e_cand in [em_dm_low, pulisci_formato_email(email_generica)]:
         if email_valida(e_cand):
             if e_cand not in tutte_esistenti:
                 if not email_attuale:
@@ -504,10 +541,9 @@ def arricchisci_contatto_hubspot_esistente(
                     lista_add.append(e_cand)
                 tutte_esistenti.add(e_cand)
 
-    if lista_add:
-        nuova_str_add = ";".join(lista_add)
-        if nuova_str_add != add_attuali_str:
-            aggiornamenti["hs_additional_emails"] = nuova_str_add
+    nuova_str_add = ";".join(lista_add)
+    if nuova_str_add != add_attuali_str:
+        aggiornamenti["hs_additional_emails"] = nuova_str_add
 
     if settore and settore != "--" and not (props_attuali.get("settore") or "").strip():
         aggiornamenti["settore"] = settore.upper()
@@ -646,20 +682,7 @@ def cerca_decision_maker_osint(nome_azienda, dominio, email_generica):
         radice_pulita = radice_raw.replace('-', ' ').strip()
     headers = {'X-API-KEY': serper_api_key, 'Content-Type': 'application/json'}
 
-    dominio_email = dominio
-    em_gen_clean = pulisci_formato_email(email_generica)
-    if email_valida(em_gen_clean):
-        dom_estratto = em_gen_clean.split("@")[-1].strip().lower()
-        provider_gen = {
-            'gmail.com', 'libero.it', 'virgilio.it', 'alice.it', 'tin.it', 'tiscali.it',
-            'hotmail.com', 'hotmail.it', 'outlook.com', 'outlook.it', 'yahoo.com', 'yahoo.it',
-            'icloud.com', 'email.it', 'azienda.it', 'dominio.it', 'esempio.it', 'example.com',
-            'info.com', 'info.it', 'test.it', 'pcert.it', 'arubapec.it', 'legalmail.it',
-            'pec.it', 'postecert.it', 'manstar.org', 'xing.com', 'jimdoweb.com', 'webnode.it', 'webnode.page'
-        }
-        escl_d = ('pec', 'cert', 'legalmail', 'jimdo', 'webnode', 'wixsite')
-        if dom_estratto and dom_estratto not in provider_gen and not any(p in dom_estratto for p in escl_d):
-            dominio_email = dom_estratto
+    dominio_email = dominio_aziendale_per_referente(dominio, email_generica)
 
     try:
         termini_az = []
@@ -736,6 +759,10 @@ Risultati:
         nome_dm = parti[0].strip() if len(parti) > 0 else "SCONOSCIUTO"
         ruolo_dm = parti[1].strip() if len(parti) > 1 else "NESSUNO"
         email_dm = pulisci_formato_email(parti[2]) if len(parti) > 2 else "NESSUNA"
+        if "@" in email_dm and dominio_email:
+            local_part, dom_dm = email_dm.split("@", 1)
+            if dom_dm in PROVIDER_EMAIL_PERSONALI:
+                email_dm = f"{local_part}@{dominio_email}"
         if "SCONOSCIUTO" in nome_dm.upper() or len(nome_dm) < 3 or " " not in nome_dm:
             return "SCONOSCIUTO", "NESSUNO", "NESSUNA"
         return nome_dm, ruolo_dm, email_dm
@@ -789,7 +816,20 @@ def integra_referenti_e_telefoni_mancanti(worksheet_assistente, dati_prospect):
             continue
 
         email_ref_pulita = pulisci_formato_email(email_ref_att_raw)
-        if " " in email_ref_att_raw and email_valida(email_ref_pulita):
+        email_errata_precedente = None
+
+        # Corregge automaticamente email referente create su provider personali (es. fabio.frigato@me.com -> @pantasvit.it)
+        if "@" in email_ref_pulita and dominio_az and dominio_az not in PROVIDER_EMAIL_PERSONALI:
+            loc_ref, dom_ref = email_ref_pulita.split("@", 1)
+            if dom_ref in PROVIDER_EMAIL_PERSONALI and "." in loc_ref:
+                nuova_em_az = f"{loc_ref}@{dominio_az}"
+                if email_valida(nuova_em_az):
+                    email_errata_precedente = email_ref_pulita
+                    email_ref_pulita = nuova_em_az
+                    worksheet_assistente.update(values=[[email_ref_pulita]], range_name=f"H{num_riga_sheet}")
+                    print(f"Email referente corretta su dominio aziendale ({nome_az}): {email_errata_precedente} -> {email_ref_pulita}")
+
+        if " " in email_ref_att_raw and email_valida(email_ref_pulita) and not email_errata_precedente:
             worksheet_assistente.update(values=[[email_ref_pulita]], range_name=f"H{num_riga_sheet}")
 
         cifre_att = re.sub(r'\D', '', telefono_att)
@@ -812,6 +852,15 @@ def integra_referenti_e_telefoni_mancanti(worksheet_assistente, dati_prospect):
                 arricchisci_contatto_hubspot_esistente(
                     contact_id_fix, telefono=tel_corretto, sostituisci_tel_errato=True, nome_azienda_pulito=nome_az
                 )
+
+        if email_errata_precedente:
+            contact_id_em = cerca_id_hubspot_contact(dominio_az, nome_az)
+            if contact_id_em:
+                arricchisci_contatto_hubspot_esistente(
+                    contact_id_em, url_sito=url_az, email_generica=email_az,
+                    email_dm=email_ref_pulita, email_errata_da_sostituire=email_errata_precedente
+                )
+                print(f"Aggiornata su HubSpot email aziendale per {nome_az}: {email_ref_pulita}")
 
         if stato_crm_att.startswith("Errore CRM"):
             nuovo_stato = crea_hubspot_contact(
@@ -859,7 +908,8 @@ def integra_referenti_e_telefoni_mancanti(worksheet_assistente, dati_prospect):
                 contact_id = cerca_id_hubspot_contact(dominio_az, nome_az)
                 if contact_id:
                     stato_agg = arricchisci_contatto_hubspot_esistente(
-                        contact_id, url_sito=url_az, email_generica=email_az,
+                        contact_id, url_sito=url_sito if 'url_sito' in locals() else url_az,
+                        email_generica=email_az,
                         nome_dm=nome_dm, ruolo_dm=ruolo_dm,
                         email_dm=(email_dm if email_valida(email_dm) else None),
                         telefono=tel_trovato, sostituisci_tel_errato=(era_piva or era_doppio39),
